@@ -1,3 +1,16 @@
 plugins {
-    id 'com.android.application' version '8.13.0' apply false
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.dip1968.androidapp'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.dip1968.androidapp'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0'
+    }
 }
