@@ -3,6 +3,7 @@ package com.dip1968.androidapp;
 import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothLeAdvertiser;
 import android.bluetooth.BluetoothLeScanner;
 import android.bluetooth.le.AdvertiseCallback;
@@ -15,11 +16,8 @@ import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.os.ParcelUuid;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -36,11 +34,8 @@ public class MainActivity extends Activity {
 
     private static final int PERMISSION_REQUEST = 100;
 
-    // Same UUID is used by both phones.
     private static final UUID MILKMAN_UUID =
             UUID.fromString("7d2a0001-6a4f-4c2d-9e01-1234567890ab");
-
-    private final Handler handler = new Handler(Looper.getMainLooper());
 
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothLeAdvertiser advertiser;
@@ -49,41 +44,30 @@ public class MainActivity extends Activity {
     private AdvertiseCallback advertiseCallback;
     private ScanCallback scanCallback;
 
-    private boolean advertising = false;
-    private boolean scanning = false;
-
-    private boolean isMilkman = false;
-    private boolean roleSelected = false;
-
-    private long lastAlertTime = 0;
-
     private TextView roleText;
     private TextView statusText;
     private Button startButton;
     private Button stopButton;
 
+    private boolean roleSelected = false;
+    private boolean milkman = false;
+    private boolean advertising = false;
+    private boolean scanning = false;
+
+    private long lastAlert = 0;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        setupBluetooth();
-        createUI();
-    }
-
-    private void setupBluetooth() {
-
-        if (!getPackageManager().hasSystemFeature(
-                PackageManager.FEATURE_BLUETOOTH_LE)) {
-            return;
-        }
-
-        android.bluetooth.BluetoothManager manager =
-                (android.bluetooth.BluetoothManager)
-                        getSystemService(Context.BLUETOOTH_SERVICE);
+        BluetoothManager manager =
+                (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
 
         if (manager != null) {
             bluetoothAdapter = manager.getAdapter();
         }
+
+        createUI();
     }
 
     private void createUI() {
@@ -91,84 +75,72 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(35, 45, 35, 35);
-        root.setBackgroundColor(Color.WHITE);
+        root.setPadding(30, 40, 30, 30);
 
         TextView title = new TextView(this);
         title.setText("🥛 દૂધવાળો Alert");
         title.setTextSize(28);
-        title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
-
         root.addView(title, params());
 
         roleText = new TextView(this);
         roleText.setText("તમારો Role પસંદ કરો");
         roleText.setTextSize(20);
-        roleText.setTextColor(Color.DKGRAY);
         roleText.setGravity(Gravity.CENTER);
         roleText.setPadding(0, 25, 0, 15);
-
         root.addView(roleText, params());
 
         Button milkmanButton = new Button(this);
         milkmanButton.setText("🥛 હું દૂધવાળો છું");
-        milkmanButton.setTextSize(18);
         root.addView(milkmanButton, params());
 
         Button homeButton = new Button(this);
         homeButton.setText("🏠 હું ઘર છું");
-        homeButton.setTextSize(18);
         root.addView(homeButton, params());
 
         startButton = new Button(this);
-        startButton.setText("▶️ START");
-        startButton.setTextSize(18);
+        startButton.setText("▶ START");
         startButton.setEnabled(false);
-
-        LinearLayout.LayoutParams startParams = params();
-        startParams.topMargin = 25;
-        root.addView(startButton, startParams);
+        root.addView(startButton, params());
 
         stopButton = new Button(this);
-        stopButton.setText("⏹️ STOP");
-        stopButton.setTextSize(18);
+        stopButton.setText("⏹ STOP");
         stopButton.setEnabled(false);
         root.addView(stopButton, params());
 
         statusText = new TextView(this);
         statusText.setText("Status: તૈયાર");
-        statusText.setTextSize(19);
-        statusText.setTextColor(Color.DKGRAY);
+        statusText.setTextSize(18);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 30, 0, 0);
-
+        statusText.setPadding(0, 25, 0, 0);
         root.addView(statusText, params());
 
         setContentView(root);
 
         milkmanButton.setOnClickListener(v -> {
 
-            stopEverything();
+            stopServices();
 
-            isMilkman = true;
+            milkman = true;
             roleSelected = true;
 
             roleText.setText("Role: 🥛 દૂધવાળો");
-            statusText.setText("Status: START દબાવો");
+            statusText.setText("START દબાવો");
+
             startButton.setEnabled(true);
             stopButton.setEnabled(false);
         });
 
         homeButton.setOnClickListener(v -> {
 
-            stopEverything();
+            stopServices();
 
-            isMilkman = false;
+            milkman = false;
             roleSelected = true;
 
             roleText.setText("Role: 🏠 ઘર");
-            statusText.setText("Status: START દબાવો");
+            statusText.setText("START દબાવો");
+
             startButton.setEnabled(true);
             stopButton.setEnabled(false);
         });
@@ -176,11 +148,6 @@ public class MainActivity extends Activity {
         startButton.setOnClickListener(v -> {
 
             if (!roleSelected) {
-                Toast.makeText(
-                        this,
-                        "પહેલા Role પસંદ કરો",
-                        Toast.LENGTH_SHORT
-                ).show();
                 return;
             }
 
@@ -192,7 +159,17 @@ public class MainActivity extends Activity {
             startRole();
         });
 
-        stopButton.setOnClickListener(v -> stopEverything());
+        stopButton.setOnClickListener(v -> {
+
+            stopServices();
+
+            statusText.setText(
+                    "⏹ Service બંધ છે\n\nSTART દબાવીને ફરી શરૂ કરો."
+            );
+
+            startButton.setEnabled(roleSelected);
+            stopButton.setEnabled(false);
+        });
     }
 
     private LinearLayout.LayoutParams params() {
@@ -203,24 +180,18 @@ public class MainActivity extends Activity {
         );
     }
 
-    // ------------------------------------------------------------
-    // START ROLE
-    // ------------------------------------------------------------
-
     private void startRole() {
 
         if (bluetoothAdapter == null) {
 
-            statusText.setText(
-                    "❌ આ ફોનમાં Bluetooth ઉપલબ્ધ નથી"
-            );
+            statusText.setText("❌ Bluetooth ઉપલબ્ધ નથી");
             return;
         }
 
         if (!bluetoothAdapter.isEnabled()) {
 
             statusText.setText(
-                    "⚠️ Bluetooth OFF છે"
+                    "⚠ Bluetooth OFF છે.\nBluetooth ON કરો."
             );
 
             try {
@@ -235,16 +206,12 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (isMilkman) {
+        if (milkman) {
             startAdvertising();
         } else {
             startScanning();
         }
     }
-
-    // ------------------------------------------------------------
-    // MILKMAN - ADVERTISE
-    // ------------------------------------------------------------
 
     private void startAdvertising() {
 
@@ -252,21 +219,13 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                checkSelfPermission(
-                        Manifest.permission.BLUETOOTH_ADVERTISE)
-                        != PackageManager.PERMISSION_GRANTED) {
-
-            requestBlePermissions();
-            return;
-        }
-
-        advertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+        advertiser =
+                bluetoothAdapter.getBluetoothLeAdvertiser();
 
         if (advertiser == null) {
 
             statusText.setText(
-                    "❌ આ ફોન BLE advertising support કરતો નથી"
+                    "❌ BLE advertising support નથી"
             );
             return;
         }
@@ -274,9 +233,11 @@ public class MainActivity extends Activity {
         AdvertiseSettings settings =
                 new AdvertiseSettings.Builder()
                         .setAdvertiseMode(
-                                AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                                AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
+                        )
                         .setTxPowerLevel(
-                                AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                                AdvertiseSettings.ADVERTISE_TX_POWER_HIGH
+                        )
                         .setConnectable(false)
                         .setTimeout(0)
                         .build();
@@ -285,7 +246,8 @@ public class MainActivity extends Activity {
                 new AdvertiseData.Builder()
                         .setIncludeDeviceName(false)
                         .addServiceUuid(
-                                new ParcelUuid(MILKMAN_UUID))
+                                new ParcelUuid(MILKMAN_UUID)
+                        )
                         .build();
 
         advertiseCallback = new AdvertiseCallback() {
@@ -294,9 +256,9 @@ public class MainActivity extends Activity {
             public void onStartSuccess(
                     AdvertiseSettings settingsInEffect) {
 
-                runOnUiThread(() -> {
+                advertising = true;
 
-                    advertising = true;
+                runOnUiThread(() -> {
 
                     statusText.setText(
                             "🟢 દૂધવાળો signal ચાલુ છે\n\n" +
@@ -311,13 +273,13 @@ public class MainActivity extends Activity {
             @Override
             public void onStartFailure(int errorCode) {
 
+                advertising = false;
+
                 runOnUiThread(() -> {
 
-                    advertising = false;
-
                     statusText.setText(
-                            "❌ Advertising failed\n" +
-                            "Error: " + errorCode
+                            "❌ Advertising failed\nError: "
+                                    + errorCode
                     );
 
                     startButton.setEnabled(true);
@@ -350,41 +312,14 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ------------------------------------------------------------
-    // HOME - SCAN
-    // ------------------------------------------------------------
-
     private void startScanning() {
 
         if (scanning) {
             return;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-
-            if (checkSelfPermission(
-                    Manifest.permission.BLUETOOTH_SCAN)
-                    != PackageManager.PERMISSION_GRANTED ||
-                checkSelfPermission(
-                    Manifest.permission.BLUETOOTH_CONNECT)
-                    != PackageManager.PERMISSION_GRANTED) {
-
-                requestBlePermissions();
-                return;
-            }
-
-        } else {
-
-            if (checkSelfPermission(
-                    Manifest.permission.ACCESS_FINE_LOCATION)
-                    != PackageManager.PERMISSION_GRANTED) {
-
-                requestBlePermissions();
-                return;
-            }
-        }
-
-        scanner = bluetoothAdapter.getBluetoothLeScanner();
+        scanner =
+                bluetoothAdapter.getBluetoothLeScanner();
 
         if (scanner == null) {
 
@@ -397,13 +332,15 @@ public class MainActivity extends Activity {
         ScanFilter filter =
                 new ScanFilter.Builder()
                         .setServiceUuid(
-                                new ParcelUuid(MILKMAN_UUID))
+                                new ParcelUuid(MILKMAN_UUID)
+                        )
                         .build();
 
         ScanSettings settings =
                 new ScanSettings.Builder()
                         .setScanMode(
-                                ScanSettings.SCAN_MODE_LOW_LATENCY)
+                                ScanSettings.SCAN_MODE_LOW_LATENCY
+                        )
                         .build();
 
         scanCallback = new ScanCallback() {
@@ -413,20 +350,19 @@ public class MainActivity extends Activity {
                     int callbackType,
                     ScanResult result) {
 
-                runOnUiThread(() ->
-                        milkmanFound()
-                );
+                runOnUiThread(() -> milkmanFound());
             }
 
             @Override
             public void onScanFailed(int errorCode) {
 
+                scanning = false;
+
                 runOnUiThread(() -> {
 
-                    scanning = false;
-
                     statusText.setText(
-                            "❌ Scan failed\nError: " + errorCode
+                            "❌ Scan failed\nError: "
+                                    + errorCode
                     );
 
                     startButton.setEnabled(true);
@@ -465,21 +401,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ------------------------------------------------------------
-    // MILKMAN FOUND
-    // ------------------------------------------------------------
-
     private void milkmanFound() {
 
         long now = System.currentTimeMillis();
 
-        // BLE sends many packets every second.
-        // Alert only once every 5 seconds.
-        if (now - lastAlertTime < 5000) {
+        if (now - lastAlert < 5000) {
             return;
         }
 
-        lastAlertTime = now;
+        lastAlert = now;
 
         statusText.setText(
                 "🟢 દૂધવાળો નજીક છે!\n\n" +
@@ -494,10 +424,6 @@ public class MainActivity extends Activity {
 
         alert();
     }
-
-    // ------------------------------------------------------------
-    // BEEP + VIBRATION
-    // ------------------------------------------------------------
 
     private void alert() {
 
@@ -514,10 +440,7 @@ public class MainActivity extends Activity {
                     500
             );
 
-            handler.postDelayed(
-                    tone::release,
-                    700
-            );
+            tone.release();
 
         } catch (Exception ignored) {
         }
@@ -552,41 +475,35 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ------------------------------------------------------------
-    // PERMISSIONS
-    // ------------------------------------------------------------
-
     private boolean hasPermissions() {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.S) {
 
             return checkSelfPermission(
-                    Manifest.permission.BLUETOOTH_SCAN)
-                    == PackageManager.PERMISSION_GRANTED
-
+                    Manifest.permission.BLUETOOTH_SCAN
+            ) == PackageManager.PERMISSION_GRANTED
                     &&
-
                     checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_CONNECT)
-                    == PackageManager.PERMISSION_GRANTED
-
+                            Manifest.permission.BLUETOOTH_CONNECT
+                    ) == PackageManager.PERMISSION_GRANTED
                     &&
-
                     checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_ADVERTISE)
-                    == PackageManager.PERMISSION_GRANTED;
+                            Manifest.permission.BLUETOOTH_ADVERTISE
+                    ) == PackageManager.PERMISSION_GRANTED;
 
         } else {
 
             return checkSelfPermission(
-                    Manifest.permission.ACCESS_FINE_LOCATION)
-                    == PackageManager.PERMISSION_GRANTED;
+                    Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED;
         }
     }
 
     private void requestBlePermissions() {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.S) {
 
             requestPermissions(
                     new String[]{
@@ -651,59 +568,34 @@ public class MainActivity extends Activity {
             statusText.setText(
                     "❌ Bluetooth permission જરૂરી છે"
             );
-
-            Toast.makeText(
-                    this,
-                    "Bluetooth permissions Allow કરો",
-                    Toast.LENGTH_LONG
-            ).show();
         }
     }
 
-    // ------------------------------------------------------------
-    // STOP
-    // ------------------------------------------------------------
-
-    private void stopEverything() {
+    private void stopServices() {
 
         stopAdvertising();
         stopScanning();
-
-        if (roleSelected) {
-            statusText.setText(
-                    "⏹️ Service બંધ છે\n\nSTART દબાવીને ફરી શરૂ કરો."
-            );
-        } else {
-            statusText.setText("Status: તૈયાર");
-        }
-
-        startButton.setEnabled(roleSelected);
-        stopButton.setEnabled(false);
     }
 
     private void stopAdvertising() {
 
-        if (!advertising ||
-                advertiser == null ||
-                advertiseCallback == null) {
+        if (advertiser != null &&
+                advertiseCallback != null) {
 
-            advertising = false;
-            return;
-        }
+            try {
 
-        try {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                        checkSelfPermission(
+                                Manifest.permission.BLUETOOTH_ADVERTISE
+                        ) == PackageManager.PERMISSION_GRANTED) {
 
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                    checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_ADVERTISE)
-                            == PackageManager.PERMISSION_GRANTED) {
+                    advertiser.stopAdvertising(
+                            advertiseCallback
+                    );
+                }
 
-                advertiser.stopAdvertising(
-                        advertiseCallback
-                );
+            } catch (Exception ignored) {
             }
-
-        } catch (Exception ignored) {
         }
 
         advertising = false;
@@ -712,25 +604,21 @@ public class MainActivity extends Activity {
 
     private void stopScanning() {
 
-        if (!scanning ||
-                scanner == null ||
-                scanCallback == null) {
+        if (scanner != null &&
+                scanCallback != null) {
 
-            scanning = false;
-            return;
-        }
+            try {
 
-        try {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                        checkSelfPermission(
+                                Manifest.permission.BLUETOOTH_SCAN
+                        ) == PackageManager.PERMISSION_GRANTED) {
 
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                    checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_SCAN)
-                            == PackageManager.PERMISSION_GRANTED) {
+                    scanner.stopScan(scanCallback);
+                }
 
-                scanner.stopScan(scanCallback);
+            } catch (Exception ignored) {
             }
-
-        } catch (Exception ignored) {
         }
 
         scanning = false;
@@ -740,8 +628,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
 
-        stopEverything(
-            handler.removeCallbacksAndMessages(null);
+        stopServices();
 
         super.onDestroy();
     }
