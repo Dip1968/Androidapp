@@ -3,7 +3,6 @@ package com.dip1968.androidapp;
 import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothLeAdvertiser;
 import android.bluetooth.BluetoothLeScanner;
 import android.bluetooth.le.AdvertiseCallback;
@@ -25,333 +24,250 @@ import android.os.ParcelUuid;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Collections;
 import java.util.UUID;
 
 public class MainActivity extends Activity {
 
-    // Same UUID must be used by both phones.
-    private static final UUID MILKMAN_SERVICE_UUID =
+    private static final int PERMISSION_REQUEST = 100;
+
+    // Same UUID is used by both phones.
+    private static final UUID MILKMAN_UUID =
             UUID.fromString("7d2a0001-6a4f-4c2d-9e01-1234567890ab");
 
-    private static final ParcelUuid MILKMAN_PARCEL_UUID =
-            new ParcelUuid(MILKMAN_SERVICE_UUID);
-
-    private static final int REQUEST_BLE_PERMISSIONS = 1001;
-
-    private enum Role {
-        NONE,
-        MILKMAN,
-        HOME
-    }
-
-    private Role currentRole = Role.NONE;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     private BluetoothAdapter bluetoothAdapter;
-    private BluetoothLeAdvertiser bluetoothLeAdvertiser;
-    private BluetoothLeScanner bluetoothLeScanner;
+    private BluetoothLeAdvertiser advertiser;
+    private BluetoothLeScanner scanner;
 
     private AdvertiseCallback advertiseCallback;
     private ScanCallback scanCallback;
 
-    private boolean isAdvertising = false;
-    private boolean isScanning = false;
+    private boolean advertising = false;
+    private boolean scanning = false;
 
-    private TextView titleText;
-    private TextView statusText;
-    private TextView roleText;
-
-    private Button milkmanButton;
-    private Button homeButton;
-    private Button startButton;
-    private Button stopButton;
-
-    private final Handler handler = new Handler(Looper.getMainLooper());
+    private boolean isMilkman = false;
+    private boolean roleSelected = false;
 
     private long lastAlertTime = 0;
+
+    private TextView roleText;
+    private TextView statusText;
+    private Button startButton;
+    private Button stopButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         setupBluetooth();
-        createUserInterface();
+        createUI();
     }
 
     private void setupBluetooth() {
 
         if (!getPackageManager().hasSystemFeature(
                 PackageManager.FEATURE_BLUETOOTH_LE)) {
-
-            bluetoothAdapter = null;
             return;
         }
 
-        android.bluetooth.BluetoothManager bluetoothManager =
+        android.bluetooth.BluetoothManager manager =
                 (android.bluetooth.BluetoothManager)
                         getSystemService(Context.BLUETOOTH_SERVICE);
 
-        if (bluetoothManager != null) {
-            bluetoothAdapter = bluetoothManager.getAdapter();
+        if (manager != null) {
+            bluetoothAdapter = manager.getAdapter();
         }
     }
 
-    private void createUserInterface() {
+    private void createUI() {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(40, 50, 40, 40);
+        root.setPadding(35, 45, 35, 35);
         root.setBackgroundColor(Color.WHITE);
 
-        titleText = new TextView(this);
-        titleText.setText("🥛 દૂધવાળો Alert");
-        titleText.setTextSize(28);
-        titleText.setTextColor(Color.BLACK);
-        titleText.setGravity(Gravity.CENTER);
-        titleText.setPadding(0, 0, 0, 35);
+        TextView title = new TextView(this);
+        title.setText("🥛 દૂધવાળો Alert");
+        title.setTextSize(28);
+        title.setTextColor(Color.BLACK);
+        title.setGravity(Gravity.CENTER);
 
-        root.addView(titleText,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                ));
+        root.addView(title, params());
 
         roleText = new TextView(this);
-        roleText.setText("પહેલા તમારો Role પસંદ કરો");
+        roleText.setText("તમારો Role પસંદ કરો");
         roleText.setTextSize(20);
         roleText.setTextColor(Color.DKGRAY);
         roleText.setGravity(Gravity.CENTER);
-        roleText.setPadding(0, 0, 0, 25);
+        roleText.setPadding(0, 25, 0, 15);
 
-        root.addView(roleText,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                ));
+        root.addView(roleText, params());
 
-        milkmanButton = new Button(this);
+        Button milkmanButton = new Button(this);
         milkmanButton.setText("🥛 હું દૂધવાળો છું");
         milkmanButton.setTextSize(18);
+        root.addView(milkmanButton, params());
 
-        root.addView(milkmanButton,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                ));
-
-        homeButton = new Button(this);
+        Button homeButton = new Button(this);
         homeButton.setText("🏠 હું ઘર છું");
         homeButton.setTextSize(18);
-
-        LinearLayout.LayoutParams homeParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-
-        homeParams.topMargin = 15;
-
-        root.addView(homeButton, homeParams);
+        root.addView(homeButton, params());
 
         startButton = new Button(this);
         startButton.setText("▶️ START");
         startButton.setTextSize(18);
         startButton.setEnabled(false);
 
-        LinearLayout.LayoutParams startParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-
-        startParams.topMargin = 30;
-
+        LinearLayout.LayoutParams startParams = params();
+        startParams.topMargin = 25;
         root.addView(startButton, startParams);
 
         stopButton = new Button(this);
         stopButton.setText("⏹️ STOP");
         stopButton.setTextSize(18);
         stopButton.setEnabled(false);
-
-        LinearLayout.LayoutParams stopParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-
-        stopParams.topMargin = 10;
-
-        root.addView(stopButton, stopParams);
+        root.addView(stopButton, params());
 
         statusText = new TextView(this);
         statusText.setText("Status: તૈયાર");
-        statusText.setTextSize(20);
+        statusText.setTextSize(19);
         statusText.setTextColor(Color.DKGRAY);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 40, 0, 0);
+        statusText.setPadding(0, 30, 0, 0);
 
-        root.addView(statusText,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                ));
+        root.addView(statusText, params());
 
         setContentView(root);
 
         milkmanButton.setOnClickListener(v -> {
 
-            currentRole = Role.MILKMAN;
+            stopEverything();
 
-            roleText.setText("તમારો Role: 🥛 દૂધવાળો");
+            isMilkman = true;
+            roleSelected = true;
+
+            roleText.setText("Role: 🥛 દૂધવાળો");
             statusText.setText("Status: START દબાવો");
             startButton.setEnabled(true);
-
-            Toast.makeText(
-                    MainActivity.this,
-                    "દૂધવાળો Role પસંદ થયો",
-                    Toast.LENGTH_SHORT
-            ).show();
+            stopButton.setEnabled(false);
         });
 
         homeButton.setOnClickListener(v -> {
 
-            currentRole = Role.HOME;
+            stopEverything();
 
-            roleText.setText("તમારો Role: 🏠 ઘર");
+            isMilkman = false;
+            roleSelected = true;
+
+            roleText.setText("Role: 🏠 ઘર");
             statusText.setText("Status: START દબાવો");
             startButton.setEnabled(true);
-
-            Toast.makeText(
-                    MainActivity.this,
-                    "ઘર Role પસંદ થયો",
-                    Toast.LENGTH_SHORT
-            ).show();
+            stopButton.setEnabled(false);
         });
 
         startButton.setOnClickListener(v -> {
 
-            if (currentRole == Role.NONE) {
+            if (!roleSelected) {
                 Toast.makeText(
-                        MainActivity.this,
+                        this,
                         "પહેલા Role પસંદ કરો",
                         Toast.LENGTH_SHORT
                 ).show();
                 return;
             }
 
-            if (!hasRequiredPermissions()) {
-                requestRequiredPermissions();
+            if (!hasPermissions()) {
+                requestBlePermissions();
                 return;
             }
 
-            startSelectedRole();
+            startRole();
         });
 
         stopButton.setOnClickListener(v -> stopEverything());
     }
 
-    private void startSelectedRole() {
+    private LinearLayout.LayoutParams params() {
+
+        return new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+    }
+
+    // ------------------------------------------------------------
+    // START ROLE
+    // ------------------------------------------------------------
+
+    private void startRole() {
 
         if (bluetoothAdapter == null) {
 
             statusText.setText(
                     "❌ આ ફોનમાં Bluetooth ઉપલબ્ધ નથી"
             );
-
             return;
         }
 
         if (!bluetoothAdapter.isEnabled()) {
 
             statusText.setText(
-                    "⚠️ Bluetooth OFF છે. Bluetooth ON કરો."
+                    "⚠️ Bluetooth OFF છે"
             );
 
             try {
-                Intent enableBluetoothIntent =
-                        new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-
-                startActivity(enableBluetoothIntent);
-
-            } catch (Exception e) {
-
-                Toast.makeText(
-                        this,
-                        "Bluetooth ON કરો",
-                        Toast.LENGTH_SHORT
-                ).show();
+                startActivity(
+                        new Intent(
+                                BluetoothAdapter.ACTION_REQUEST_ENABLE
+                        )
+                );
+            } catch (Exception ignored) {
             }
 
             return;
         }
 
-        if (!getPackageManager().hasSystemFeature(
-                PackageManager.FEATURE_BLUETOOTH_LE)) {
-
-            statusText.setText(
-                    "❌ આ ફોન BLE support કરતો નથી"
-            );
-
-            return;
-        }
-
-        if (currentRole == Role.MILKMAN) {
-
+        if (isMilkman) {
             startAdvertising();
-
-        } else if (currentRole == Role.HOME) {
-
+        } else {
             startScanning();
         }
     }
 
-    // ============================================================
-    // MILKMAN - BLE ADVERTISING
-    // ============================================================
+    // ------------------------------------------------------------
+    // MILKMAN - ADVERTISE
+    // ------------------------------------------------------------
 
     private void startAdvertising() {
 
-        if (isAdvertising) {
-            statusText.setText(
-                    "🟢 દૂધવાળો signal ચાલુ છે"
-            );
+        if (advertising) {
             return;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                checkSelfPermission(
+                        Manifest.permission.BLUETOOTH_ADVERTISE)
+                        != PackageManager.PERMISSION_GRANTED) {
 
-            if (checkSelfPermission(
-                    Manifest.permission.BLUETOOTH_ADVERTISE)
-                    != PackageManager.PERMISSION_GRANTED) {
-
-                requestRequiredPermissions();
-                return;
-            }
+            requestBlePermissions();
+            return;
         }
 
-        bluetoothLeAdvertiser =
-                bluetoothAdapter.getBluetoothLeAdvertiser();
+        advertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
 
-        if (bluetoothLeAdvertiser == null) {
+        if (advertiser == null) {
 
             statusText.setText(
                     "❌ આ ફોન BLE advertising support કરતો નથી"
             );
-
-            Toast.makeText(
-                    this,
-                    "આ ફોન BLE advertising support કરતો નથી",
-                    Toast.LENGTH_LONG
-            ).show();
-
             return;
         }
 
@@ -365,10 +281,11 @@ public class MainActivity extends Activity {
                         .setTimeout(0)
                         .build();
 
-        AdvertiseData advertiseData =
+        AdvertiseData data =
                 new AdvertiseData.Builder()
                         .setIncludeDeviceName(false)
-                        .addServiceUuid(MILKMAN_PARCEL_UUID)
+                        .addServiceUuid(
+                                new ParcelUuid(MILKMAN_UUID))
                         .build();
 
         advertiseCallback = new AdvertiseCallback() {
@@ -379,21 +296,15 @@ public class MainActivity extends Activity {
 
                 runOnUiThread(() -> {
 
-                    isAdvertising = true;
+                    advertising = true;
 
                     statusText.setText(
                             "🟢 દૂધવાળો signal ચાલુ છે\n\n" +
-                            "હવે ઘરનો ફોન તમને શોધી શકે છે."
+                            "ઘરનો ફોન તમને શોધી શકે છે."
                     );
 
                     startButton.setEnabled(false);
                     stopButton.setEnabled(true);
-
-                    Toast.makeText(
-                            MainActivity.this,
-                            "🥛 દૂધવાળો signal ચાલુ!",
-                            Toast.LENGTH_SHORT
-                    ).show();
                 });
             }
 
@@ -402,59 +313,50 @@ public class MainActivity extends Activity {
 
                 runOnUiThread(() -> {
 
-                    isAdvertising = false;
+                    advertising = false;
 
                     statusText.setText(
-                            "❌ BLE Advertising શરૂ થયું નથી\n" +
-                            "Error code: " + errorCode
+                            "❌ Advertising failed\n" +
+                            "Error: " + errorCode
                     );
 
-                    stopButton.setEnabled(false);
                     startButton.setEnabled(true);
+                    stopButton.setEnabled(false);
                 });
             }
         };
 
         try {
 
-            bluetoothLeAdvertiser.startAdvertising(
+            advertiser.startAdvertising(
                     settings,
-                    advertiseData,
+                    data,
                     advertiseCallback
             );
 
             statusText.setText(
-                    "⏳ દૂધવાળો signal શરૂ થઈ રહ્યો છે..."
+                    "⏳ Signal શરૂ થઈ રહ્યો છે..."
             );
 
         } catch (SecurityException e) {
 
-            statusText.setText(
-                    "❌ Bluetooth permission જરૂરી છે"
-            );
-
-            requestRequiredPermissions();
+            requestBlePermissions();
 
         } catch (Exception e) {
 
             statusText.setText(
-                    "❌ Advertising error: " + e.getMessage()
+                    "❌ Advertising error"
             );
         }
     }
 
-    // ============================================================
-    // HOME - BLE SCANNING
-    // ============================================================
+    // ------------------------------------------------------------
+    // HOME - SCAN
+    // ------------------------------------------------------------
 
     private void startScanning() {
 
-        if (isScanning) {
-
-            statusText.setText(
-                    "🔍 દૂધવાળાને શોધી રહ્યા છીએ..."
-            );
-
+        if (scanning) {
             return;
         }
 
@@ -463,11 +365,11 @@ public class MainActivity extends Activity {
             if (checkSelfPermission(
                     Manifest.permission.BLUETOOTH_SCAN)
                     != PackageManager.PERMISSION_GRANTED ||
-                    checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_CONNECT)
-                            != PackageManager.PERMISSION_GRANTED) {
+                checkSelfPermission(
+                    Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED) {
 
-                requestRequiredPermissions();
+                requestBlePermissions();
                 return;
             }
 
@@ -477,34 +379,28 @@ public class MainActivity extends Activity {
                     Manifest.permission.ACCESS_FINE_LOCATION)
                     != PackageManager.PERMISSION_GRANTED) {
 
-                requestRequiredPermissions();
+                requestBlePermissions();
                 return;
             }
         }
 
-        bluetoothLeScanner =
-                bluetoothAdapter.getBluetoothLeScanner();
+        scanner = bluetoothAdapter.getBluetoothLeScanner();
 
-        if (bluetoothLeScanner == null) {
+        if (scanner == null) {
 
             statusText.setText(
                     "❌ BLE scanner ઉપલબ્ધ નથી"
             );
-
             return;
         }
 
         ScanFilter filter =
                 new ScanFilter.Builder()
-                        .setServiceUuid(MILKMAN_PARCEL_UUID)
+                        .setServiceUuid(
+                                new ParcelUuid(MILKMAN_UUID))
                         .build();
 
-        List<ScanFilter> filters =
-                new ArrayList<>();
-
-        filters.add(filter);
-
-        ScanSettings scanSettings =
+        ScanSettings settings =
                 new ScanSettings.Builder()
                         .setScanMode(
                                 ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -518,29 +414,8 @@ public class MainActivity extends Activity {
                     ScanResult result) {
 
                 runOnUiThread(() ->
-                        milkmanDetected(result)
+                        milkmanFound()
                 );
-            }
-
-            @Override
-            public void onBatchScanResults(
-                    List<ScanResult> results) {
-
-                if (results == null) {
-                    return;
-                }
-
-                for (ScanResult result : results) {
-
-                    if (result != null) {
-
-                        runOnUiThread(() ->
-                                milkmanDetected(result)
-                        );
-
-                        break;
-                    }
-                }
             }
 
             @Override
@@ -548,11 +423,10 @@ public class MainActivity extends Activity {
 
                 runOnUiThread(() -> {
 
-                    isScanning = false;
+                    scanning = false;
 
                     statusText.setText(
-                            "❌ BLE Scan failed\n" +
-                            "Error code: " + errorCode
+                            "❌ Scan failed\nError: " + errorCode
                     );
 
                     startButton.setEnabled(true);
@@ -563,17 +437,17 @@ public class MainActivity extends Activity {
 
         try {
 
-            bluetoothLeScanner.startScan(
-                    filters,
-                    scanSettings,
+            scanner.startScan(
+                    Collections.singletonList(filter),
+                    settings,
                     scanCallback
             );
 
-            isScanning = true;
+            scanning = true;
 
             statusText.setText(
                     "🔍 દૂધવાળાને શોધી રહ્યા છીએ...\n\n" +
-                    "દૂધવાળો ફોન નજીક આવે ત્યારે alert મળશે."
+                    "દૂધવાળો નજીક આવે ત્યારે alert મળશે."
             );
 
             startButton.setEnabled(false);
@@ -581,25 +455,26 @@ public class MainActivity extends Activity {
 
         } catch (SecurityException e) {
 
-            statusText.setText(
-                    "❌ Bluetooth permission જરૂરી છે"
-            );
-
-            requestRequiredPermissions();
+            requestBlePermissions();
 
         } catch (Exception e) {
 
             statusText.setText(
-                    "❌ Scanning error: " + e.getMessage()
+                    "❌ Scanning error"
             );
         }
     }
 
-    private void milkmanDetected(ScanResult result) {
+    // ------------------------------------------------------------
+    // MILKMAN FOUND
+    // ------------------------------------------------------------
+
+    private void milkmanFound() {
 
         long now = System.currentTimeMillis();
 
-        // Avoid continuous beep/Toast for every BLE packet.
+        // BLE sends many packets every second.
+        // Alert only once every 5 seconds.
         if (now - lastAlertTime < 5000) {
             return;
         }
@@ -611,36 +486,36 @@ public class MainActivity extends Activity {
                 "🔊 દૂધવાળો આવ્યો છે"
         );
 
-        playAlert();
-
         Toast.makeText(
                 this,
                 "🥛 દૂધવાળો આવી ગયો!",
                 Toast.LENGTH_LONG
         ).show();
+
+        alert();
     }
 
-    // ============================================================
-    // ALERT
-    // ============================================================
+    // ------------------------------------------------------------
+    // BEEP + VIBRATION
+    // ------------------------------------------------------------
 
-    private void playAlert() {
+    private void alert() {
 
         try {
 
-            android.media.ToneGenerator toneGenerator =
+            android.media.ToneGenerator tone =
                     new android.media.ToneGenerator(
                             android.media.AudioManager.STREAM_NOTIFICATION,
                             100
                     );
 
-            toneGenerator.startTone(
+            tone.startTone(
                     android.media.ToneGenerator.TONE_PROP_BEEP,
                     500
             );
 
             handler.postDelayed(
-                    toneGenerator::release,
+                    tone::release,
                     700
             );
 
@@ -677,32 +552,197 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
+    // ------------------------------------------------------------
     // PERMISSIONS
-    // ============================================================
+    // ------------------------------------------------------------
 
-    private boolean hasRequiredPermissions() {
+    private boolean hasPermissions() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 
-            boolean scan =
-                    checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_SCAN)
-                            == PackageManager.PERMISSION_GRANTED;
+            return checkSelfPermission(
+                    Manifest.permission.BLUETOOTH_SCAN)
+                    == PackageManager.PERMISSION_GRANTED
 
-            boolean connect =
+                    &&
+
                     checkSelfPermission(
                             Manifest.permission.BLUETOOTH_CONNECT)
-                            == PackageManager.PERMISSION_GRANTED;
+                    == PackageManager.PERMISSION_GRANTED
 
-            boolean advertise =
+                    &&
+
                     checkSelfPermission(
                             Manifest.permission.BLUETOOTH_ADVERTISE)
-                            == PackageManager.PERMISSION_GRANTED;
-
-            return scan && connect && advertise;
+                    == PackageManager.PERMISSION_GRANTED;
 
         } else {
 
             return checkSelfPermission(
-                    Manifest.permission.ACCESS_F
+                    Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+    private void requestBlePermissions() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+
+            requestPermissions(
+                    new String[]{
+                            Manifest.permission.BLUETOOTH_SCAN,
+                            Manifest.permission.BLUETOOTH_CONNECT,
+                            Manifest.permission.BLUETOOTH_ADVERTISE
+                    },
+                    PERMISSION_REQUEST
+            );
+
+        } else {
+
+            requestPermissions(
+                    new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                    },
+                    PERMISSION_REQUEST
+            );
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode,
+            String[] permissions,
+            int[] grantResults) {
+
+        super.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults
+        );
+
+        if (requestCode != PERMISSION_REQUEST) {
+            return;
+        }
+
+        boolean granted = true;
+
+        for (int result : grantResults) {
+
+            if (result != PackageManager.PERMISSION_GRANTED) {
+                granted = false;
+                break;
+            }
+        }
+
+        if (granted) {
+
+            Toast.makeText(
+                    this,
+                    "Bluetooth permission મળી ગઈ",
+                    Toast.LENGTH_SHORT
+            ).show();
+
+            if (roleSelected) {
+                startRole();
+            }
+
+        } else {
+
+            statusText.setText(
+                    "❌ Bluetooth permission જરૂરી છે"
+            );
+
+            Toast.makeText(
+                    this,
+                    "Bluetooth permissions Allow કરો",
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
+    // ------------------------------------------------------------
+    // STOP
+    // ------------------------------------------------------------
+
+    private void stopEverything() {
+
+        stopAdvertising();
+        stopScanning();
+
+        if (roleSelected) {
+            statusText.setText(
+                    "⏹️ Service બંધ છે\n\nSTART દબાવીને ફરી શરૂ કરો."
+            );
+        } else {
+            statusText.setText("Status: તૈયાર");
+        }
+
+        startButton.setEnabled(roleSelected);
+        stopButton.setEnabled(false);
+    }
+
+    private void stopAdvertising() {
+
+        if (!advertising ||
+                advertiser == null ||
+                advertiseCallback == null) {
+
+            advertising = false;
+            return;
+        }
+
+        try {
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                    checkSelfPermission(
+                            Manifest.permission.BLUETOOTH_ADVERTISE)
+                            == PackageManager.PERMISSION_GRANTED) {
+
+                advertiser.stopAdvertising(
+                        advertiseCallback
+                );
+            }
+
+        } catch (Exception ignored) {
+        }
+
+        advertising = false;
+        advertiseCallback = null;
+    }
+
+    private void stopScanning() {
+
+        if (!scanning ||
+                scanner == null ||
+                scanCallback == null) {
+
+            scanning = false;
+            return;
+        }
+
+        try {
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                    checkSelfPermission(
+                            Manifest.permission.BLUETOOTH_SCAN)
+                            == PackageManager.PERMISSION_GRANTED) {
+
+                scanner.stopScan(scanCallback);
+            }
+
+        } catch (Exception ignored) {
+        }
+
+        scanning = false;
+        scanCallback = null;
+    }
+
+    @Override
+    protected void onDestroy() {
+
+        stopEverything(
+            handler.removeCallbacksAndMessages(null);
+
+        super.onDestroy();
+    }
+}
