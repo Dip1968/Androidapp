@@ -2,634 +2,755 @@ package com.dip1968.androidapp;
 
 import android.Manifest;
 import android.app.Activity;
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothManager;
-import android.bluetooth.le.BluetoothLeAdvertiser;
-import android.bluetooth.le.BluetoothLeScanner;
-import android.bluetooth.le.AdvertiseCallback;
-import android.bluetooth.le.AdvertiseData;
-import android.bluetooth.le.AdvertiseSettings;
-import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanFilter;
-import android.bluetooth.le.ScanResult;
-import android.bluetooth.le.ScanSettings;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.os.Build;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.net.wifi.p2p.WifiP2pConfig;
+import android.net.wifi.p2p.WifiP2pDevice;
+import android.net.wifi.p2p.WifiP2pDeviceList;
+import android.net.wifi.p2p.WifiP2pInfo;
+import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Bundle;
-import android.os.ParcelUuid;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.os.Build;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.Collections;
-import java.util.UUID;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    private static final int PERMISSION_REQUEST = 100;
+    private static final int REQUEST_PERMISSIONS = 1001;
 
-    private static final UUID MILKMAN_UUID =
-            UUID.fromString("7d2a0001-6a4f-4c2d-9e01-1234567890ab");
+    private static final int PORT = 8988;
 
-    private BluetoothAdapter bluetoothAdapter;
-    private BluetoothLeAdvertiser advertiser;
-    private BluetoothLeScanner scanner;
+    // Society radius: 150 meters
+    private static final float SOCIETY_RADIUS_METERS = 150f;
 
-    private AdvertiseCallback advertiseCallback;
-    private ScanCallback scanCallback;
-
-    private TextView roleText;
     private TextView statusText;
+    private TextView gpsText;
+    private TextView wifiText;
+
+    private RadioGroup roleGroup;
+    private RadioButton milkmanRadio;
+    private RadioButton homeRadio;
+
+    private Button societyButton;
     private Button startButton;
     private Button stopButton;
 
-    private boolean roleSelected = false;
-    private boolean milkman = false;
-    private boolean advertising = false;
-    private boolean scanning = false;
+    private boolean isMilkman = false;
+    private boolean running = false;
 
-    private long lastAlert = 0;
+    private WifiP2pManager wifiManager;
+    private WifiP2pManager.Channel wifiChannel;
+
+    private BroadcastReceiver wifiReceiver;
+    private IntentFilter wifiIntentFilter;
+
+    private final List<WifiP2pDevice> peers = new ArrayList<>();
+
+    private LocationManager locationManager;
+    private Location lastLocation;
+
+    private double societyLatitude = 0.0;
+    private double societyLongitude = 0.0;
+    private boolean societyLocationSet = false;
+
+    private SharedPreferences preferences;
+
+    private ServerSocket serverSocket;
+    private Socket connectedSocket;
+
+    private Thread serverThread;
+    private Thread socketThread;
+
+    private Handler handler = new Handler(Looper.getMainLooper());
+
+    private boolean alreadyAlerted = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        BluetoothManager manager =
-                (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        preferences = getSharedPreferences("dudh_alert", MODE_PRIVATE);
 
-        if (manager != null) {
-            bluetoothAdapter = manager.getAdapter();
-        }
+        loadSocietyLocation();
 
         createUI();
+
+        initializeWifiDirect();
+
+        initializeLocation();
+
+        requestRequiredPermissions();
     }
+
+    // ---------------------------------------------------------
+    // UI
+    // ---------------------------------------------------------
 
     private void createUI() {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(30, 40, 30, 30);
+        root.setPadding(30, 30, 30, 30);
 
         TextView title = new TextView(this);
-        title.setText("🥛 દૂધવાળો Alert");
-        title.setTextSize(28);
+        title.setText("🥛 દૂધવાળો Alert - V2");
+        title.setTextSize(26);
         title.setGravity(Gravity.CENTER);
-        root.addView(title, params());
+        title.setPadding(0, 10, 0, 30);
 
-        roleText = new TextView(this);
-        roleText.setText("તમારો Role પસંદ કરો");
-        roleText.setTextSize(20);
-        roleText.setGravity(Gravity.CENTER);
-        roleText.setPadding(0, 25, 0, 15);
-        root.addView(roleText, params());
+        root.addView(title);
 
-        Button milkmanButton = new Button(this);
-        milkmanButton.setText("🥛 હું દૂધવાળો છું");
-        root.addView(milkmanButton, params());
+        TextView roleTitle = new TextView(this);
+        roleTitle.setText("તમારો ફોન કયો છે?");
+        roleTitle.setTextSize(18);
 
-        Button homeButton = new Button(this);
-        homeButton.setText("🏠 હું ઘર છું");
-        root.addView(homeButton, params());
+        root.addView(roleTitle);
+
+        roleGroup = new RadioGroup(this);
+        roleGroup.setOrientation(RadioGroup.VERTICAL);
+
+        homeRadio = new RadioButton(this);
+        homeRadio.setText("🏠 ઘર");
+        homeRadio.setTextSize(18);
+
+        milkmanRadio = new RadioButton(this);
+        milkmanRadio.setText("🥛 દૂધવાળો");
+        milkmanRadio.setTextSize(18);
+
+        roleGroup.addView(homeRadio);
+        roleGroup.addView(milkmanRadio);
+
+        homeRadio.setChecked(true);
+
+        root.addView(roleGroup);
+
+        societyButton = new Button(this);
+        societyButton.setText("📍 Society Location Set કરો");
+
+        root.addView(societyButton);
 
         startButton = new Button(this);
-        startButton.setText("▶ START");
-        startButton.setEnabled(false);
-        root.addView(startButton, params());
+        startButton.setText("▶️ Start");
+
+        root.addView(startButton);
 
         stopButton = new Button(this);
-        stopButton.setText("⏹ STOP");
-        stopButton.setEnabled(false);
-        root.addView(stopButton, params());
+        stopButton.setText("⏹ Stop");
+
+        root.addView(stopButton);
+
+        gpsText = new TextView(this);
+        gpsText.setText("📍 GPS: Waiting...");
+        gpsText.setTextSize(16);
+        gpsText.setPadding(0, 20, 0, 10);
+
+        root.addView(gpsText);
+
+        wifiText = new TextView(this);
+        wifiText.setText("📡 Wi-Fi Direct: Waiting...");
+        wifiText.setTextSize(16);
+        wifiText.setPadding(0, 10, 0, 10);
+
+        root.addView(wifiText);
 
         statusText = new TextView(this);
-        statusText.setText("Status: તૈયાર");
-        statusText.setTextSize(18);
+        statusText.setText("Ready");
+        statusText.setTextSize(20);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 25, 0, 0);
-        root.addView(statusText, params());
+        statusText.setPadding(10, 30, 10, 30);
+
+        root.addView(statusText);
 
         setContentView(root);
 
-        milkmanButton.setOnClickListener(v -> {
+        roleGroup.setOnCheckedChangeListener((group, checkedId) -> {
 
-            stopServices();
+            if (checkedId == milkmanRadio.getId()) {
+                isMilkman = true;
 
-            milkman = true;
-            roleSelected = true;
+                societyButton.setVisibility(Button.GONE);
 
-            roleText.setText("Role: 🥛 દૂધવાળો");
-            statusText.setText("START દબાવો");
+                statusText.setText(
+                        "🥛 દૂધવાળો mode\n\n" +
+                        "GPS + Wi-Fi Direct માટે Ready"
+                );
 
-            startButton.setEnabled(true);
-            stopButton.setEnabled(false);
-        });
+            } else {
+                isMilkman = false;
 
-        homeButton.setOnClickListener(v -> {
+                societyButton.setVisibility(Button.VISIBLE);
 
-            stopServices();
-
-            milkman = false;
-            roleSelected = true;
-
-            roleText.setText("Role: 🏠 ઘર");
-            statusText.setText("START દબાવો");
-
-            startButton.setEnabled(true);
-            stopButton.setEnabled(false);
-        });
-
-        startButton.setOnClickListener(v -> {
-
-            if (!roleSelected) {
-                return;
+                statusText.setText(
+                        "🏠 ઘર mode\n\n" +
+                        "પહેલા Society Location Set કરો"
+                );
             }
-
-            if (!hasPermissions()) {
-                requestBlePermissions();
-                return;
-            }
-
-            startRole();
         });
 
-        stopButton.setOnClickListener(v -> {
+        societyButton.setOnClickListener(v -> setSocietyLocation());
 
-            stopServices();
+        startButton.setOnClickListener(v -> startSystem());
 
-            statusText.setText(
-                    "⏹ Service બંધ છે\n\nSTART દબાવીને ફરી શરૂ કરો."
+        stopButton.setOnClickListener(v -> stopSystem());
+    }
+
+    // ---------------------------------------------------------
+    // Permissions
+    // ---------------------------------------------------------
+
+    private void requestRequiredPermissions() {
+
+        List<String> permissions = new ArrayList<>();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES);
+
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        }
+
+        List<String> missing = new ArrayList<>();
+
+        for (String permission : permissions) {
+
+            if (checkSelfPermission(permission)
+                    != PackageManager.PERMISSION_GRANTED) {
+
+                missing.add(permission);
+            }
+        }
+
+        if (!missing.isEmpty()) {
+
+            requestPermissions(
+                    missing.toArray(new String[0]),
+                    REQUEST_PERMISSIONS
             );
-
-            startButton.setEnabled(roleSelected);
-            stopButton.setEnabled(false);
-        });
+        }
     }
 
-    private LinearLayout.LayoutParams params() {
+    // ---------------------------------------------------------
+    // Wi-Fi Direct
+    // ---------------------------------------------------------
 
-        return new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        );
-    }
+    private void initializeWifiDirect() {
 
-    private void startRole() {
+        wifiManager =
+                (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
 
-        if (bluetoothAdapter == null) {
+        if (wifiManager == null) {
 
-            statusText.setText("❌ Bluetooth ઉપલબ્ધ નથી");
+            wifiText.setText("❌ Wi-Fi Direct supported નથી");
+
             return;
         }
 
-        if (!bluetoothAdapter.isEnabled()) {
-
-            statusText.setText(
-                    "⚠ Bluetooth OFF છે.\nBluetooth ON કરો."
-            );
-
-            try {
-                startActivity(
-                        new Intent(
-                                BluetoothAdapter.ACTION_REQUEST_ENABLE
+        wifiChannel =
+                wifiManager.initialize(
+                        this,
+                        getMainLooper(),
+                        () -> runOnUiThread(() ->
+                                wifiText.setText(
+                                        "📡 Wi-Fi Direct channel lost"
+                                )
                         )
                 );
-            } catch (Exception ignored) {
-            }
 
-            return;
-        }
+        wifiIntentFilter = new IntentFilter();
 
-        if (milkman) {
-            startAdvertising();
-        } else {
-            startScanning();
-        }
-    }
-
-    private void startAdvertising() {
-
-        if (advertising) {
-            return;
-        }
-
-        advertiser =
-                bluetoothAdapter.getBluetoothLeAdvertiser();
-
-        if (advertiser == null) {
-
-            statusText.setText(
-                    "❌ BLE advertising support નથી"
-            );
-            return;
-        }
-
-        AdvertiseSettings settings =
-                new AdvertiseSettings.Builder()
-                        .setAdvertiseMode(
-                                AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
-                        )
-                        .setTxPowerLevel(
-                                AdvertiseSettings.ADVERTISE_TX_POWER_HIGH
-                        )
-                        .setConnectable(false)
-                        .setTimeout(0)
-                        .build();
-
-        AdvertiseData data =
-                new AdvertiseData.Builder()
-                        .setIncludeDeviceName(false)
-                        .addServiceUuid(
-                                new ParcelUuid(MILKMAN_UUID)
-                        )
-                        .build();
-
-        advertiseCallback = new AdvertiseCallback() {
-
-            @Override
-            public void onStartSuccess(
-                    AdvertiseSettings settingsInEffect) {
-
-                advertising = true;
-
-                runOnUiThread(() -> {
-
-                    statusText.setText(
-                            "🟢 દૂધવાળો signal ચાલુ છે\n\n" +
-                            "ઘરનો ફોન તમને શોધી શકે છે."
-                    );
-
-                    startButton.setEnabled(false);
-                    stopButton.setEnabled(true);
-                });
-            }
-
-            @Override
-            public void onStartFailure(int errorCode) {
-
-                advertising = false;
-
-                runOnUiThread(() -> {
-
-                    statusText.setText(
-                            "❌ Advertising failed\nError: "
-                                    + errorCode
-                    );
-
-                    startButton.setEnabled(true);
-                    stopButton.setEnabled(false);
-                });
-            }
-        };
-
-        try {
-
-            advertiser.startAdvertising(
-                    settings,
-                    data,
-                    advertiseCallback
-            );
-
-            statusText.setText(
-                    "⏳ Signal શરૂ થઈ રહ્યો છે..."
-            );
-
-        } catch (SecurityException e) {
-
-            requestBlePermissions();
-
-        } catch (Exception e) {
-
-            statusText.setText(
-                    "❌ Advertising error"
-            );
-        }
-    }
-
-    private void startScanning() {
-
-        if (scanning) {
-            return;
-        }
-
-        scanner =
-                bluetoothAdapter.getBluetoothLeScanner();
-
-        if (scanner == null) {
-
-            statusText.setText(
-                    "❌ BLE scanner ઉપલબ્ધ નથી"
-            );
-            return;
-        }
-
-        ScanFilter filter =
-                new ScanFilter.Builder()
-                        .setServiceUuid(
-                                new ParcelUuid(MILKMAN_UUID)
-                        )
-                        .build();
-
-        ScanSettings settings =
-                new ScanSettings.Builder()
-                        .setScanMode(
-                                ScanSettings.SCAN_MODE_LOW_LATENCY
-                        )
-                        .build();
-
-        scanCallback = new ScanCallback() {
-
-            @Override
-            public void onScanResult(
-                    int callbackType,
-                    ScanResult result) {
-
-                runOnUiThread(() -> milkmanFound());
-            }
-
-            @Override
-            public void onScanFailed(int errorCode) {
-
-                scanning = false;
-
-                runOnUiThread(() -> {
-
-                    statusText.setText(
-                            "❌ Scan failed\nError: "
-                                    + errorCode
-                    );
-
-                    startButton.setEnabled(true);
-                    stopButton.setEnabled(false);
-                });
-            }
-        };
-
-        try {
-
-            scanner.startScan(
-                    Collections.singletonList(filter),
-                    settings,
-                    scanCallback
-            );
-
-            scanning = true;
-
-            statusText.setText(
-                    "🔍 દૂધવાળાને શોધી રહ્યા છીએ...\n\n" +
-                    "દૂધવાળો નજીક આવે ત્યારે alert મળશે."
-            );
-
-            startButton.setEnabled(false);
-            stopButton.setEnabled(true);
-
-        } catch (SecurityException e) {
-
-            requestBlePermissions();
-
-        } catch (Exception e) {
-
-            statusText.setText(
-                    "❌ Scanning error"
-            );
-        }
-    }
-
-    private void milkmanFound() {
-
-        long now = System.currentTimeMillis();
-
-        if (now - lastAlert < 5000) {
-            return;
-        }
-
-        lastAlert = now;
-
-        statusText.setText(
-                "🟢 દૂધવાળો નજીક છે!\n\n" +
-                "🔊 દૂધવાળો આવ્યો છે"
+        wifiIntentFilter.addAction(
+                WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION
         );
 
-        Toast.makeText(
-                this,
-                "🥛 દૂધવાળો આવી ગયો!",
-                Toast.LENGTH_LONG
-        ).show();
+        wifiIntentFilter.addAction(
+                WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
+        );
 
-        alert();
+        wifiIntentFilter.addAction(
+                WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION
+        );
+
+        wifiIntentFilter.addAction(
+                WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION
+        );
+
+        wifiReceiver = new BroadcastReceiver() {
+
+            @Override
+            public void onReceive(Context context, Intent intent) {
+
+                String action = intent.getAction();
+
+                if (WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION
+                        .equals(action)) {
+
+                    int state = intent.getIntExtra(
+                            WifiP2pManager.EXTRA_WIFI_STATE,
+                            -1
+                    );
+
+                    if (state ==
+                            WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
+
+                        wifiText.setText(
+                                "📡 Wi-Fi Direct ON"
+                        );
+
+                    } else {
+
+                        wifiText.setText(
+                                "❌ Wi-Fi Direct OFF કરો"
+                        );
+                    }
+
+                } else if (
+                        WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
+                                .equals(action)) {
+
+                    requestPeers();
+
+                } else if (
+                        WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION
+                                .equals(action)) {
+
+                    requestConnectionInfo();
+                }
+            }
+        };
     }
 
-    private void alert() {
+    private void requestPeers() {
 
-        try {
-
-            android.media.ToneGenerator tone =
-                    new android.media.ToneGenerator(
-                            android.media.AudioManager.STREAM_NOTIFICATION,
-                            100
-                    );
-
-            tone.startTone(
-                    android.media.ToneGenerator.TONE_PROP_BEEP,
-                    500
-            );
-
-            tone.release();
-
-        } catch (Exception ignored) {
+        if (wifiManager == null || wifiChannel == null) {
+            return;
         }
 
-        try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 
-            Vibrator vibrator =
-                    (Vibrator) getSystemService(
-                            Context.VIBRATOR_SERVICE
+            if (checkSelfPermission(
+                    Manifest.permission.NEARBY_WIFI_DEVICES)
+                    != PackageManager.PERMISSION_GRANTED) {
+
+                return;
+            }
+        }
+
+        wifiManager.requestPeers(
+                wifiChannel,
+                peerListListener
+        );
+    }
+
+    private final WifiP2pManager.PeerListListener peerListListener =
+            new WifiP2pManager.PeerListListener() {
+
+                @Override
+                public void onPeersAvailable(
+                        WifiP2pDeviceList peerList) {
+
+                    peers.clear();
+
+                    peers.addAll(
+                            peerList.getDeviceList()
                     );
 
-            if (vibrator != null &&
-                    vibrator.hasVibrator()) {
+                    runOnUiThread(() -> {
 
-                if (Build.VERSION.SDK_INT >=
-                        Build.VERSION_CODES.O) {
+                        wifiText.setText(
+                                "📡 Wi-Fi Direct peers: "
+                                        + peers.size()
+                        );
 
-                    vibrator.vibrate(
-                            VibrationEffect.createOneShot(
-                                    500,
-                                    VibrationEffect.DEFAULT_AMPLITUDE
+                        if (isMilkman &&
+                                running &&
+                                !peers.isEmpty()) {
+
+                            connectToHome();
+                        }
+                    });
+                }
+            };
+
+    // ---------------------------------------------------------
+    // Home connection
+    // ---------------------------------------------------------
+
+    private void connectToHome() {
+
+        if (wifiManager == null ||
+                wifiChannel == null ||
+                peers.isEmpty()) {
+
+            return;
+        }
+
+        WifiP2pDevice target = peers.get(0);
+
+        WifiP2pConfig config = new WifiP2pConfig();
+
+        config.deviceAddress = target.deviceAddress;
+
+        wifiText.setText(
+                "📡 Home phone સાથે connect થઈ રહ્યું છે..."
+        );
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+            if (checkSelfPermission(
+                    Manifest.permission.NEARBY_WIFI_DEVICES)
+                    != PackageManager.PERMISSION_GRANTED) {
+
+                return;
+            }
+        }
+
+        wifiManager.connect(
+                wifiChannel,
+                config,
+                new WifiP2pManager.ActionListener() {
+
+                    @Override
+                    public void onSuccess() {
+
+                        wifiText.setText(
+                                "📡 Wi-Fi Direct connection request sent"
+                        );
+                    }
+
+                    @Override
+                    public void onFailure(int reason) {
+
+                        wifiText.setText(
+                                "❌ Wi-Fi Direct connect failed: "
+                                        + reason
+                        );
+                    }
+                }
+        );
+    }
+
+    // ---------------------------------------------------------
+    // Connection info
+    // ---------------------------------------------------------
+
+    private void requestConnectionInfo() {
+
+        if (wifiManager == null ||
+                wifiChannel == null) {
+
+            return;
+        }
+
+        wifiManager.requestConnectionInfo(
+                wifiChannel,
+                info -> {
+
+                    if (info == null ||
+                            !info.groupFormed) {
+
+                        return;
+                    }
+
+                    runOnUiThread(() -> {
+
+                        wifiText.setText(
+                                "🟢 Wi-Fi Direct connected"
+                        );
+                    });
+
+                    if (info.isGroupOwner) {
+
+                        startServer();
+
+                    } else {
+
+                        InetAddress ownerAddress =
+                                info.groupOwnerAddress;
+
+                        if (ownerAddress != null) {
+
+                            connectToServer(
+                                    ownerAddress.getHostAddress()
+                            );
+                        }
+                    }
+                }
+        );
+    }
+
+    // ---------------------------------------------------------
+    // Server - Home
+    // ---------------------------------------------------------
+
+    private void startServer() {
+
+        if (serverThread != null &&
+                serverThread.isAlive()) {
+
+            return;
+        }
+
+        serverThread = new Thread(() -> {
+
+            try {
+
+                if (serverSocket != null &&
+                        !serverSocket.isClosed()) {
+
+                    serverSocket.close();
+                }
+
+                serverSocket =
+                        new ServerSocket(PORT);
+
+                runOnUiThread(() ->
+                        wifiText.setText(
+                                "📡 Home server ready"
+                        )
+                );
+
+                while (running) {
+
+                    Socket socket =
+                            serverSocket.accept();
+
+                    connectedSocket = socket;
+
+                    handleIncomingSocket(socket);
+                }
+
+            } catch (Exception e) {
+
+                runOnUiThread(() ->
+                        wifiText.setText(
+                                "❌ Server stopped"
+                        )
+                );
+            }
+        });
+
+        serverThread.start();
+    }
+
+    private void handleIncomingSocket(Socket socket) {
+
+        try {
+
+            BufferedReader reader =
+                    new BufferedReader(
+                            new InputStreamReader(
+                                    socket.getInputStream()
                             )
                     );
 
-                } else {
+            String message;
 
-                    vibrator.vibrate(500);
-                }
+            while (running &&
+                    (message = reader.readLine()) != null) {
+
+                final String received = message;
+
+                runOnUiThread(() ->
+                        handleMessage(received)
+                );
             }
 
         } catch (Exception ignored) {
+
         }
     }
 
-    private boolean hasPermissions() {
+    // ---------------------------------------------------------
+    // Client - Milkman
+    // ---------------------------------------------------------
 
-        if (Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.S) {
+    private void connectToServer(String host) {
 
-            return checkSelfPermission(
-                    Manifest.permission.BLUETOOTH_SCAN
-            ) == PackageManager.PERMISSION_GRANTED
-                    &&
-                    checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_CONNECT
-                    ) == PackageManager.PERMISSION_GRANTED
-                    &&
-                    checkSelfPermission(
-                            Manifest.permission.BLUETOOTH_ADVERTISE
-                    ) == PackageManager.PERMISSION_GRANTED;
+        if (socketThread != null &&
+                socketThread.isAlive()) {
 
-        } else {
-
-            return checkSelfPermission(
-                    Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED;
-        }
-    }
-
-    private void requestBlePermissions() {
-
-        if (Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.S) {
-
-            requestPermissions(
-                    new String[]{
-                            Manifest.permission.BLUETOOTH_SCAN,
-                            Manifest.permission.BLUETOOTH_CONNECT,
-                            Manifest.permission.BLUETOOTH_ADVERTISE
-                    },
-                    PERMISSION_REQUEST
-            );
-
-        } else {
-
-            requestPermissions(
-                    new String[]{
-                            Manifest.permission.ACCESS_FINE_LOCATION
-                    },
-                    PERMISSION_REQUEST
-            );
-        }
-    }
-
-    @Override
-    public void onRequestPermissionsResult(
-            int requestCode,
-            String[] permissions,
-            int[] grantResults) {
-
-        super.onRequestPermissionsResult(
-                requestCode,
-                permissions,
-                grantResults
-        );
-
-        if (requestCode != PERMISSION_REQUEST) {
             return;
         }
 
-        boolean granted = true;
+        socketThread = new Thread(() -> {
 
-        for (int result : grantResults) {
+            try {
 
-            if (result != PackageManager.PERMISSION_GRANTED) {
-                granted = false;
-                break;
+                Thread.sleep(1000);
+
+                Socket socket =
+                        new Socket(
+                                host,
+                                PORT
+                        );
+
+                connectedSocket = socket;
+
+                runOnUiThread(() ->
+                        wifiText.setText(
+                                "🟢 Home સાથે connected"
+                        )
+                );
+
+                PrintWriter writer =
+                        new PrintWriter(
+                                new OutputStreamWriter(
+                                        socket.getOutputStream()
+                                ),
+                                true
+                        );
+
+                sendGpsStatus(writer);
+
+                while (running) {
+
+                    Thread.sleep(5000);
+
+                    sendGpsStatus(writer);
+                }
+
+            } catch (Exception e) {
+
+                runOnUiThread(() ->
+                        wifiText.setText(
+                                "📡 Home connection waiting..."
+                        )
+                );
             }
+        });
+
+        socketThread.start();
+    }
+
+    // ---------------------------------------------------------
+    // Send GPS status
+    // ---------------------------------------------------------
+
+    private void sendGpsStatus(PrintWriter writer) {
+
+        if (lastLocation == null) {
+
+            return;
         }
 
-        if (granted) {
+        if (!societyLocationSet) {
 
-            Toast.makeText(
-                    this,
-                    "Bluetooth permission મળી ગઈ",
-                    Toast.LENGTH_SHORT
-            ).show();
+            runOnUiThread(() ->
+                    gpsText.setText(
+                            "📍 Society location set નથી"
+                    )
+            );
 
-            if (roleSelected) {
-                startRole();
-            }
+            return;
+        }
+
+        float[] distance = new float[1];
+
+        Location.distanceBetween(
+                lastLocation.getLatitude(),
+                lastLocation.getLongitude(),
+
+                societyLatitude,
+                societyLongitude,
+
+                distance
+        );
+
+        float meters = distance[0];
+
+        boolean inside =
+                meters <= SOCIETY_RADIUS_METERS;
+
+        String message;
+
+        if (inside) {
+
+            message = "MILKMAN_ENTERED";
 
         } else {
 
+            message = "MILKMAN_OUTSIDE";
+        }
+
+        writer.println(message);
+
+        final float finalMeters = meters;
+
+        runOnUiThread(() ->
+                gpsText.setText(
+                        String.format(
+                                Locale.US,
+                                "📍 Distance: %.0f m\n%s",
+                                finalMeters,
+                                inside
+                                        ? "🟢 Societyમાં"
+                                        : "🔴 Society બહાર"
+                        )
+                )
+        );
+    }
+
+    // ---------------------------------------------------------
+    // Incoming message
+    // ---------------------------------------------------------
+
+    private void handleMessage(String message) {
+
+        if ("MILKMAN_ENTERED".equals(message)) {
+
+            if (!alreadyAlerted) {
+
+                alreadyAlerted = true;
+
+                showMilkmanAlert();
+            }
+
+        } else if ("MILKMAN_OUTSIDE".equals(message)) {
+
+            alreadyAlerted = false;
+
             statusText.setText(
-                    "❌ Bluetooth permission જરૂરી છે"
+                    "🔴 દૂધવાળો Societyની બહાર છે"
             );
         }
     }
 
-    private void stopServices() {
-
-        stopAdvertising();
-        stopScanning();
-    }
-
-    private void stopAdvertising() {
-
-        if (advertiser != null &&
-                advertiseCallback != null) {
-
-            try {
-
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                        checkSelfPermission(
-                                Manifest.permission.BLUETOOTH_ADVERTISE
-                        ) == PackageManager.PERMISSION_GRANTED) {
-
-                    advertiser.stopAdvertising(
-                            advertiseCallback
-                    );
-                }
-
-            } catch (Exception ignored) {
-            }
-        }
-
-        advertising = false;
-        advertiseCallback = null;
-    }
-
-    private void stopScanning() {
-
-        if (scanner != null &&
-                scanCallback != null) {
-
-            try {
-
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                        checkSelfPermission(
-                                Manifest.permission.BLUETOOTH_SCAN
-                        ) == PackageManager.PERMISSION_GRANTED) {
-
-                    scanner.stopScan(scanCallback);
-                }
-
-            } catch (Exception ignored) {
-            }
-        }
-
-        scanning = false;
-        scanCallback = null;
-    }
-
-    @Override
-    protected void onDestroy() {
-
-        stopServices();
-
-        super.onDestroy();
-    }
-}
+    // -----------------------
