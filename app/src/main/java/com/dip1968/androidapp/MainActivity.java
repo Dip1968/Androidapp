@@ -20,7 +20,7 @@ public class MainActivity extends Activity {
      * અહીં તમારું Google Apps Script URL નાખવાનું છે.
      */
     public static final String API_URL =
-            "PASTE_YOUR_APPS_SCRIPT_URL_HERE";
+            "https://script.google.com/macros/s/AKfycbyV1Wyg-3yX4Lrtm1XT9L3LqsyNGCR1uII3GxxrN6IT_Eg5JuIXiFcNbqNTNJ05YBqY/exec";
 
     public static final String TOKEN =
             "DUDHWALO_2026_SECRET";
