@@ -1,110 +1,151 @@
 package com.dip1968.androidapp;
 
-import android.app.*;
-import android.content.*;
-import android.location.*;
-import android.os.*;
+import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
 
-import java.io.*;
-import java.net.*;
-import java.util.*;
+import org.json.JSONObject;
 
-public class LocationService
-        extends Service {
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class LocationService extends Service {
+
+    // ---------------------------------------------------------
+    // CONFIGURATION
+    // ---------------------------------------------------------
 
     private static final int FG_ID = 100;
-
     private static final int ALERT_ID = 200;
 
-    private static final long CHECK =
-            5000;
+    // Home checks server every 5 seconds
+    private static final long HOME_CHECK_INTERVAL = 5000L;
 
-    private static final float RADIUS =
-            150f;
+    // Default society radius
+    private static final float DEFAULT_RADIUS = 500f;
+
+    // GPS accuracy required for reliable detection
+    private static final float MAX_ACCEPTABLE_ACCURACY = 100f;
+
+    // Exit only after crossing radius + this buffer.
+    // Example:
+    // radius = 500m
+    // enter <= 500m
+    // exit  >= 600m
+    private static final float EXIT_BUFFER = 100f;
+
+    // Need two consecutive good inside readings
+    // before declaring ENTERED.
+    private static final int REQUIRED_INSIDE_READINGS = 2;
+
+    // ---------------------------------------------------------
+    // ANDROID
+    // ---------------------------------------------------------
 
     private LocationManager locationManager;
-
     private Handler handler;
 
     private Runnable homeTask;
 
-    private Location lastLocation;
+    private final ExecutorService networkExecutor =
+            Executors.newSingleThreadExecutor();
+
+    // ---------------------------------------------------------
+    // LOCATION / SOCIETY
+    // ---------------------------------------------------------
 
     private double societyLat;
-
     private double societyLon;
 
     private boolean societySet;
 
+    private float radius = DEFAULT_RADIUS;
+
+    private Location lastLocation;
+
+    // ---------------------------------------------------------
+    // STATE
+    // ---------------------------------------------------------
+
     private boolean inside = false;
 
-    private String homeId;
+    private int consecutiveInsideReadings = 0;
+
+    private String lastSentState = "";
+
+    // ---------------------------------------------------------
+    // HOME
+    // ---------------------------------------------------------
+
+    private String homeId = "HOME1";
+
+    // ---------------------------------------------------------
+    // SERVICE ROLE
+    // ---------------------------------------------------------
+
+    private String currentRole = "HOME";
+
+    // ---------------------------------------------------------
+    // LIFECYCLE
+    // ---------------------------------------------------------
 
     @Override
     public void onCreate() {
-
         super.onCreate();
 
-        handler =
-                new Handler(
-                        Looper.getMainLooper()
-                );
+        handler = new Handler(Looper.getMainLooper());
 
         loadSettings();
 
-        createChannels();
-    }
-
-    private void loadSettings() {
-
-        SharedPreferences p =
-                getSharedPreferences(
-                        "app", 0
-                );
-
-        societySet =
-                p.getBoolean(
-                        "set",
-                        false
-                );
-
-        societyLat =
-                Double.longBitsToDouble(
-                        p.getLong("lat", 0)
-                );
-
-        societyLon =
-                Double.longBitsToDouble(
-                        p.getLong("lon", 0)
-                );
-
-        homeId =
-                p.getString(
-                        "homeId",
-                        "HOME1"
-                );
+        createNotificationChannels();
     }
 
     @Override
     public int onStartCommand(
             Intent intent,
             int flags,
-            int startId) {
+            int startId
+    ) {
 
-        String role =
-                intent.getStringExtra(
-                        "role"
-                );
+        if (intent != null) {
 
-        if (role == null)
-            role = "HOME";
+            String role =
+                    intent.getStringExtra("role");
 
+            if (role != null) {
+                currentRole = role;
+            }
+        }
+
+        if (currentRole == null) {
+            currentRole = "HOME";
+        }
+
+        // Foreground service notification
         startForeground(
                 FG_ID,
-                foregroundNotification(role)
+                createForegroundNotification(currentRole)
         );
 
-        if (role.equals("MILKMAN")) {
+        if ("MILKMAN".equals(currentRole)) {
 
             startMilkman();
 
@@ -116,58 +157,182 @@ public class LocationService
         return START_STICKY;
     }
 
-    private Notification foregroundNotification(
-            String role) {
+    // ---------------------------------------------------------
+    // LOAD SETTINGS
+    // ---------------------------------------------------------
 
-        String text =
-                role.equals("MILKMAN")
-                        ? "🥛 GPS Monitoring ચાલુ"
-                        : "🏠 દૂધવાળાની રાહ જોઈ રહ્યા છીએ";
+    private void loadSettings() {
 
-        return new Notification.Builder(
-                this,
-                "service"
-        )
+        SharedPreferences p =
+                getSharedPreferences("app", MODE_PRIVATE);
+
+        societySet =
+                p.getBoolean("set", false);
+
+        societyLat =
+                Double.longBitsToDouble(
+                        p.getLong("lat", 0L)
+                );
+
+        societyLon =
+                Double.longBitsToDouble(
+                        p.getLong("lon", 0L)
+                );
+
+        homeId =
+                p.getString(
+                        "homeId",
+                        "HOME1"
+                );
+
+        // Try to read radius saved by MainActivity.
+        // Supports both float and String storage.
+
+        try {
+
+            radius =
+                    p.getFloat(
+                            "radius",
+                            DEFAULT_RADIUS
+                    );
+
+        } catch (Exception ignored) {
+
+            try {
+
+                String radiusString =
+                        p.getString(
+                                "radius",
+                                String.valueOf(DEFAULT_RADIUS)
+                        );
+
+                radius =
+                        Float.parseFloat(radiusString);
+
+            } catch (Exception ignoredAgain) {
+
+                radius = DEFAULT_RADIUS;
+            }
+        }
+
+        // Safety
+        if (radius < 50f) {
+            radius = DEFAULT_RADIUS;
+        }
+
+        if (radius > 5000f) {
+            radius = 5000f;
+        }
+    }
+
+    // ---------------------------------------------------------
+    // NOTIFICATION CHANNELS
+    // ---------------------------------------------------------
+
+    private void createNotificationChannels() {
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+
+        NotificationManager manager =
+                (NotificationManager)
+                        getSystemService(
+                                Context.NOTIFICATION_SERVICE
+                        );
+
+        if (manager == null) {
+            return;
+        }
+
+        // Foreground service channel
+        NotificationChannel serviceChannel =
+                new NotificationChannel(
+                        "service",
+                        "Location Service",
+                        NotificationManager.IMPORTANCE_LOW
+                );
+
+        serviceChannel.setDescription(
+                "નૈઋત location monitoring"
+        );
+
+        manager.createNotificationChannel(
+                serviceChannel
+        );
+
+        // Alert channel
+        NotificationChannel alertChannel =
+                new NotificationChannel(
+                        "alert",
+                        "Nearby Service Alerts",
+                        NotificationManager.IMPORTANCE_HIGH
+                );
+
+        alertChannel.setDescription(
+                "નજીકની service માટે alerts"
+        );
+
+        alertChannel.enableVibration(true);
+
+        manager.createNotificationChannel(
+                alertChannel
+        );
+    }
+
+    // ---------------------------------------------------------
+    // FOREGROUND NOTIFICATION
+    // ---------------------------------------------------------
+
+    private Notification createForegroundNotification(
+            String role
+    ) {
+
+        String text;
+
+        if ("MILKMAN".equals(role)) {
+
+            text =
+                    "🥛 GPS monitoring ચાલુ છે";
+
+        } else {
+
+            text =
+                    "🏠 નજીકની service તપાસી રહ્યા છીએ";
+        }
+
+        Notification.Builder builder;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+            builder =
+                    new Notification.Builder(
+                            this,
+                            "service"
+                    );
+
+        } else {
+
+            builder =
+                    new Notification.Builder(this);
+        }
+
+        return builder
                 .setContentTitle(
-                        "દૂધવાળો Alert"
+                        "નૈઋત"
                 )
                 .setContentText(text)
                 .setSmallIcon(
                         android.R.drawable.ic_dialog_info
                 )
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .build();
     }
 
-    private void createChannels() {
-
-        if (Build.VERSION.SDK_INT >= 26) {
-
-            NotificationManager nm =
-                    (NotificationManager)
-                            getSystemService(
-                                    NOTIFICATION_SERVICE
-                            );
-
-            nm.createNotificationChannel(
-                    new NotificationChannel(
-                            "service",
-                            "Location Service",
-                            NotificationManager
-                                    .IMPORTANCE_LOW
-                    )
-            );
-
-            nm.createNotificationChannel(
-                    new NotificationChannel(
-                            "alert",
-                            "Milkman Alert",
-                            NotificationManager
-                                    .IMPORTANCE_HIGH
-                    )
-            );
-        }
-    }
+    // =========================================================
+    // MILKMAN / SERVICE PROVIDER
+    // =========================================================
 
     private void startMilkman() {
 
@@ -181,49 +346,165 @@ public class LocationService
         locationManager =
                 (LocationManager)
                         getSystemService(
-                                LOCATION_SERVICE
+                                Context.LOCATION_SERVICE
                         );
+
+        if (locationManager == null) {
+            return;
+        }
+
+        if (
+                Build.VERSION.SDK_INT >=
+                        Build.VERSION_CODES.M
+        ) {
+
+            if (
+                    checkSelfPermission(
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                    ) != PackageManager.PERMISSION_GRANTED
+                    &&
+                    checkSelfPermission(
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) != PackageManager.PERMISSION_GRANTED
+            ) {
+
+                stopSelf();
+
+                return;
+            }
+        }
 
         try {
 
-            locationManager
-                    .requestLocationUpdates(
-                            LocationManager.GPS_PROVIDER,
-                            3000,
-                            5,
-                            listener
+            // GPS
+            if (
+                    locationManager.isProviderEnabled(
+                            LocationManager.GPS_PROVIDER
+                    )
+            ) {
+
+                locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        3000L,
+                        5f,
+                        listener,
+                        Looper.getMainLooper()
+                );
+            }
+
+            // Network location
+            if (
+                    locationManager.isProviderEnabled(
+                            LocationManager.NETWORK_PROVIDER
+                    )
+            ) {
+
+                locationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        5000L,
+                        10f,
+                        listener,
+                        Looper.getMainLooper()
+                );
+            }
+
+            // Get last known GPS immediately.
+            Location gpsLast =
+                    locationManager.getLastKnownLocation(
+                            LocationManager.GPS_PROVIDER
                     );
 
-            locationManager
-                    .requestLocationUpdates(
-                            LocationManager.NETWORK_PROVIDER,
-                            5000,
-                            10,
-                            listener
+            if (gpsLast != null) {
+
+                processLocation(gpsLast);
+            }
+
+            // Get last known network location.
+            Location networkLast =
+                    locationManager.getLastKnownLocation(
+                            LocationManager.NETWORK_PROVIDER
                     );
 
-        } catch (SecurityException ignored) {
+            if (networkLast != null) {
+
+                processLocation(networkLast);
+            }
+
+        } catch (SecurityException e) {
+
+            stopSelf();
         }
     }
+
+    // =========================================================
+    // LOCATION LISTENER
+    // =========================================================
 
     private final LocationListener listener =
             new LocationListener() {
 
-        @Override
-        public void onLocationChanged(
-                Location location) {
+                @Override
+                public void onLocationChanged(
+                        Location location
+                ) {
 
-            lastLocation = location;
+                    processLocation(location);
+                }
 
-            checkLocation(location);
-        }
-    };
+                @Override
+                public void onProviderDisabled(
+                        String provider
+                ) {
+                    // Nothing required.
+                }
 
-    private void checkLocation(
-            Location location) {
+                @Override
+                public void onProviderEnabled(
+                        String provider
+                ) {
+                    // Nothing required.
+                }
+            };
 
-        if (!societySet)
+    // =========================================================
+    // PROCESS LOCATION
+    // =========================================================
+
+    private void processLocation(
+            Location location
+    ) {
+
+        if (location == null) {
             return;
+        }
+
+        // Ignore obviously inaccurate readings.
+        if (
+                location.hasAccuracy()
+                &&
+                location.getAccuracy()
+                        > MAX_ACCEPTABLE_ACCURACY
+        ) {
+
+            return;
+        }
+
+        lastLocation = location;
+
+        checkSocietyDistance(location);
+    }
+
+    // =========================================================
+    // SOCIETY DISTANCE / STATE MACHINE
+    // =========================================================
+
+    private void checkSocietyDistance(
+            Location location
+    ) {
+
+        if (!societySet) {
+            return;
+        }
 
         float[] distance =
                 new float[1];
@@ -236,132 +517,252 @@ public class LocationService
                 distance
         );
 
-        boolean nowInside =
-                distance[0] <= RADIUS;
+        float distanceMeters =
+                distance[0];
 
-        if (nowInside != inside) {
+        // -----------------------------------------------------
+        // ENTER ZONE
+        // -----------------------------------------------------
 
-            inside = nowInside;
+        boolean withinEntryRadius =
+                distanceMeters <= radius;
 
-            sendStatus(
-                    nowInside
-                            ? "ENTERED"
-                            : "OUTSIDE"
-            );
+        // -----------------------------------------------------
+        // OUTSIDE ZONE
+        // Exit has extra buffer to prevent GPS bouncing.
+        // -----------------------------------------------------
+
+        boolean beyondExitRadius =
+                distanceMeters >
+                        (radius + EXIT_BUFFER);
+
+        if (!inside) {
+
+            if (withinEntryRadius) {
+
+                consecutiveInsideReadings++;
+
+            } else {
+
+                consecutiveInsideReadings = 0;
+            }
+
+            // Require two consecutive good readings
+            if (
+                    consecutiveInsideReadings
+                            >= REQUIRED_INSIDE_READINGS
+            ) {
+
+                inside = true;
+
+                consecutiveInsideReadings = 0;
+
+                sendState(
+                        "ENTERED",
+                        location
+                );
+            }
+
+        } else {
+
+            // Already inside.
+            // Do not repeatedly send ENTERED.
+
+            if (beyondExitRadius) {
+
+                inside = false;
+
+                consecutiveInsideReadings = 0;
+
+                sendState(
+                        "OUTSIDE",
+                        location
+                );
+            }
         }
     }
 
-    private void sendStatus(
-            String state) {
+    // =========================================================
+    // SEND STATUS TO GOOGLE APPS SCRIPT
+    // =========================================================
 
-        final Location l =
-                lastLocation;
+    private void sendState(
+            String state,
+            Location location
+    ) {
 
-        new Thread(() -> {
+        if (state == null) {
+            return;
+        }
+
+        // Prevent duplicate state transmissions.
+        if (state.equals(lastSentState)) {
+
+            return;
+        }
+
+        lastSentState = state;
+
+        final double lat =
+                location != null
+                        ? location.getLatitude()
+                        : 0;
+
+        final double lon =
+                location != null
+                        ? location.getLongitude()
+                        : 0;
+
+        networkExecutor.execute(() -> {
+
+            boolean success = false;
 
             try {
 
                 String url =
-                        MainActivity.API_URL +
-                        "?action=update" +
-                        "&homeId=" +
-                        encode(homeId) +
-                        "&token=" +
-                        encode(
+                        MainActivity.API_URL
+                                + "?action=update"
+                                + "&homeId="
+                                + encode(homeId)
+                                + "&token="
+                                + encode(
                                 MainActivity.TOKEN
-                        ) +
-                        "&status=" +
-                        encode(state) +
-                        "&lat=" +
-                        (l == null
-                                ? ""
-                                : l.getLatitude()) +
-                        "&lon=" +
-                        (l == null
-                                ? ""
-                                : l.getLongitude()) +
-                        "&ts=" +
-                        System.currentTimeMillis();
+                        )
+                                + "&status="
+                                + encode(state)
+                                + "&lat="
+                                + lat
+                                + "&lon="
+                                + lon
+                                + "&ts="
+                                + System.currentTimeMillis();
 
-                request(url);
+                String response =
+                        request(url);
+
+                if (response != null) {
+
+                    JSONObject json =
+                            new JSONObject(response);
+
+                    success =
+                            json.optBoolean(
+                                    "ok",
+                                    false
+                            );
+                }
 
             } catch (Exception ignored) {
             }
 
-        }).start();
+            // If server failed, allow the same state
+            // to be sent again on next valid location.
+            if (!success) {
+
+                lastSentState = "";
+            }
+        });
     }
+
+    // =========================================================
+    // HOME MODE
+    // =========================================================
 
     private void startHome() {
 
-        if (homeTask != null)
+        if (homeTask != null) {
             return;
+        }
 
         homeTask =
                 new Runnable() {
 
-            @Override
-            public void run() {
+                    @Override
+                    public void run() {
 
-                checkHome();
+                        checkHomeStatus();
 
-                handler.postDelayed(
-                        this,
-                        CHECK
-                );
-            }
-        };
+                        handler.postDelayed(
+                                this,
+                                HOME_CHECK_INTERVAL
+                        );
+                    }
+                };
 
         handler.post(homeTask);
     }
 
-    private void checkHome() {
+    // =========================================================
+    // CHECK HOME STATUS
+    // =========================================================
 
-        new Thread(() -> {
+    private void checkHomeStatus() {
+
+        networkExecutor.execute(() -> {
 
             try {
 
                 String url =
-                        MainActivity.API_URL +
-                        "?action=status" +
-                        "&homeId=" +
-                        encode(homeId) +
-                        "&token=" +
-                        encode(
+                        MainActivity.API_URL
+                                + "?action=status"
+                                + "&homeId="
+                                + encode(homeId)
+                                + "&token="
+                                + encode(
                                 MainActivity.TOKEN
                         );
 
                 String response =
                         request(url);
 
-                String state =
-                        value(
-                                response,
-                                "status"
+                if (
+                        response == null
+                        ||
+                        response.trim().isEmpty()
+                ) {
+
+                    return;
+                }
+
+                JSONObject json =
+                        new JSONObject(response);
+
+                String status =
+                        json.optString(
+                                "status",
+                                "OUTSIDE"
                         );
 
                 String event =
-                        value(
-                                response,
-                                "event"
+                        json.optString(
+                                "event",
+                                "0"
                         );
 
-                if ("ENTERED".equals(state)) {
+                if (
+                        "ENTERED".equals(status)
+                        &&
+                        event != null
+                        &&
+                        !event.isEmpty()
+                ) {
 
-                    SharedPreferences p =
+                    SharedPreferences preferences =
                             getSharedPreferences(
                                     "app",
-                                    0
+                                    MODE_PRIVATE
                             );
 
-                    String old =
-                            p.getString(
+                    String lastEvent =
+                            preferences.getString(
                                     "lastEvent",
                                     ""
                             );
 
-                    if (!event.equals(old)) {
+                    // New arrival event
+                    if (!event.equals(lastEvent)) {
 
-                        p.edit()
+                        preferences.edit()
                                 .putString(
                                         "lastEvent",
                                         event
@@ -369,24 +770,43 @@ public class LocationService
                                 .apply();
 
                         handler.post(
-                                this::showAlert
+                                this::showServiceAlert
                         );
                     }
                 }
 
             } catch (Exception ignored) {
             }
-
-        }).start();
+        });
     }
 
-    private void showAlert() {
+    // =========================================================
+    // HOME ALERT
+    // =========================================================
+
+    private void showServiceAlert() {
+
+        Notification.Builder builder;
+
+        if (
+                Build.VERSION.SDK_INT
+                        >= Build.VERSION_CODES.O
+        ) {
+
+            builder =
+                    new Notification.Builder(
+                            this,
+                            "alert"
+                    );
+
+        } else {
+
+            builder =
+                    new Notification.Builder(this);
+        }
 
         Notification notification =
-                new Notification.Builder(
-                        this,
-                        "alert"
-                )
+                builder
                         .setContentTitle(
                                 "🥛 દૂધવાળો Alert"
                         )
@@ -397,10 +817,10 @@ public class LocationService
                                 android.R.drawable
                                         .ic_dialog_alert
                         )
+                        .setAutoCancel(true)
                         .setPriority(
                                 Notification.PRIORITY_MAX
                         )
-                        .setAutoCancel(true)
                         .setVibrate(
                                 new long[]{
                                         0,
@@ -411,102 +831,132 @@ public class LocationService
                         )
                         .build();
 
-        NotificationManager nm =
+        NotificationManager manager =
                 (NotificationManager)
                         getSystemService(
-                                NOTIFICATION_SERVICE
+                                Context.NOTIFICATION_SERVICE
                         );
 
-        nm.notify(
-                ALERT_ID,
-                notification
-        );
-    }
+        if (manager != null) {
 
-    private String request(
-            String url)
-            throws Exception {
-
-        HttpURLConnection c =
-                (HttpURLConnection)
-                        new URL(url)
-                                .openConnection();
-
-        c.setRequestMethod("GET");
-
-        c.setConnectTimeout(7000);
-
-        c.setReadTimeout(7000);
-
-        InputStream in =
-                c.getInputStream();
-
-        ByteArrayOutputStream out =
-                new ByteArrayOutputStream();
-
-        byte[] buffer =
-                new byte[1024];
-
-        int n;
-
-        while ((n =
-                in.read(buffer)) != -1) {
-
-            out.write(
-                    buffer,
-                    0,
-                    n
+            manager.notify(
+                    ALERT_ID,
+                    notification
             );
         }
-
-        in.close();
-
-        c.disconnect();
-
-        return out.toString(
-                "UTF-8"
-        );
     }
+
+    // =========================================================
+    // HTTP REQUEST
+    // =========================================================
+
+    private String request(
+            String urlString
+    ) throws Exception {
+
+        HttpURLConnection connection =
+                null;
+
+        InputStream inputStream =
+                null;
+
+        try {
+
+            URL url =
+                    new URL(urlString);
+
+            connection =
+                    (HttpURLConnection)
+                            url.openConnection();
+
+            connection.setRequestMethod("GET");
+
+            connection.setConnectTimeout(10000);
+
+            connection.setReadTimeout(10000);
+
+            connection.setInstanceFollowRedirects(
+                    true
+            );
+
+            connection.setUseCaches(false);
+
+            int responseCode =
+                    connection.getResponseCode();
+
+            if (
+                    responseCode < 200
+                    ||
+                    responseCode >= 400
+            ) {
+
+                return null;
+            }
+
+            inputStream =
+                    connection.getInputStream();
+
+            ByteArrayOutputStream output =
+                    new ByteArrayOutputStream();
+
+            byte[] buffer =
+                    new byte[2048];
+
+            int count;
+
+            while (
+                    (count =
+                            inputStream.read(buffer))
+                            != -1
+            ) {
+
+                output.write(
+                        buffer,
+                        0,
+                        count
+                );
+            }
+
+            return output.toString("UTF-8");
+
+        } finally {
+
+            if (inputStream != null) {
+
+                try {
+                    inputStream.close();
+                } catch (Exception ignored) {
+                }
+            }
+
+            if (connection != null) {
+
+                connection.disconnect();
+            }
+        }
+    }
+
+    // =========================================================
+    // URL ENCODING
+    // =========================================================
 
     private String encode(
-            String s)
-            throws Exception {
+            String value
+    ) throws Exception {
+
+        if (value == null) {
+            value = "";
+        }
 
         return URLEncoder.encode(
-                s,
+                value,
                 "UTF-8"
         );
     }
 
-    private String value(
-            String json,
-            String key) {
-
-        String find =
-                "\"" + key + "\":\"";
-
-        int start =
-                json.indexOf(find);
-
-        if (start < 0)
-            return "";
-
-        start += find.length();
-
-        int end =
-                json.indexOf(
-                        "\"",
-                        start
-                );
-
-        if (end < 0)
-            return "";
-
-        return json.substring(
-                start,
-                end
-        );
-    }
+    // =========================================================
+    // SERVICE DESTROY
+    // =========================================================
 
     @Override
     public void onDestroy() {
@@ -515,30 +965,41 @@ public class LocationService
 
             try {
 
-                locationManager
-                        .removeUpdates(
-                                listener
-                        );
+                locationManager.removeUpdates(
+                        listener
+                );
 
             } catch (Exception ignored) {
             }
         }
 
-        if (handler != null &&
-                homeTask != null) {
+        if (
+                handler != null
+                &&
+                homeTask != null
+        ) {
 
             handler.removeCallbacks(
                     homeTask
             );
         }
 
+        homeTask = null;
+
+        networkExecutor.shutdownNow();
+
         super.onDestroy();
     }
 
+    // =========================================================
+    // BIND
+    // =========================================================
+
     @Override
     public IBinder onBind(
-            Intent intent) {
+            Intent intent
+    ) {
 
         return null;
     }
-        }
+}
