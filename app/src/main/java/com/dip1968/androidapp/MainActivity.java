@@ -2,54 +2,55 @@ package com.dip1968.androidapp;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.*;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.location.*;
-import android.os.*;
-import android.view.*;
-import android.widget.*;
+import android.location.Location;
+import android.location.LocationManager;
+import android.os.Build;
+import android.os.Bundle;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Space;
+import android.widget.TextView;
+import android.widget.Toast;
 
-import java.util.*;
+import java.util.ArrayList;
 
 public class MainActivity extends Activity {
 
+    // ============================================================
+    // EXISTING FUNCTIONALITY
+    // ============================================================
+
     private static final int REQ = 100;
 
-    /*
-     * EXISTING FUNCTIONALITY
-     * DO NOT CHANGE
-     */
     public static final String API_URL =
-            "https://script.google.com/macros/s/AKfycbyV1Wyg-3yX4Lrtm1XT9L3LqsyNGCR1uII3GxxrN6IT_Eg5JuIXiFcNbqNTNJ05YBqY/exec";
+            "https://script.google.com/macros/s/AKfycbyV1Wyg-3yX4Lrtm1XT9L3qsyNGCR1uII3GxxrN6IT_Eg5JuIXiFcNbqNTNJ05YBqY/exec";
 
     public static final String TOKEN =
             "DUDHWALO_2026_SECRET";
 
-    // ----------------------------------------------------
-    // Existing functionality variables
-    // ----------------------------------------------------
-
     private double societyLat;
     private double societyLon;
-
     private boolean societySet = false;
 
     private boolean providerRole = false;
 
-    private TextView status;
+    // Current screen references
     private TextView locationValue;
-    private TextView radiusValue;
-    private TextView serviceValue;
     private TextView serviceStatus;
+    private TextView globalStatus;
 
-    private Button startButton;
-    private Button stopButton;
-
-    // ----------------------------------------------------
-    // Theme
-    // ----------------------------------------------------
+    // ============================================================
+    // NAIṚT THEME
+    // ============================================================
 
     private final int PRIMARY = Color.rgb(101, 185, 242);
     private final int SECONDARY = Color.rgb(184, 227, 255);
@@ -60,13 +61,13 @@ public class MainActivity extends Activity {
     private final int SUCCESS = Color.rgb(56, 161, 105);
     private final int WARNING = Color.rgb(255, 180, 84);
 
-    // ----------------------------------------------------
-    // Activity
-    // ----------------------------------------------------
+    // ============================================================
+    // ACTIVITY
+    // ============================================================
 
     @Override
-    protected void onCreate(Bundle b) {
-        super.onCreate(b);
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
         load();
 
@@ -75,746 +76,657 @@ public class MainActivity extends Activity {
         requestPermissionsIfNeeded();
     }
 
-    // ====================================================
-    // WELCOME
-    // ====================================================
+    // ============================================================
+    // WELCOME SCREEN
+    // ============================================================
 
     private void showWelcome() {
 
-        LinearLayout root = baseLayout();
+        LinearLayout content = createContent();
 
-        Space top = new Space(this);
-        root.addView(top, new LinearLayout.LayoutParams(
-                1, dp(55)
-        ));
+        addSpace(content, 35);
 
-        TextView logo = text(
+        TextView icons = makeText(
                 "🥛  📰  🚐\n🥬  💧  🍱",
                 30,
                 TEXT,
                 Gravity.CENTER
         );
 
-        root.addView(logo, matchWrap());
+        content.addView(icons, match());
 
-        TextView title = text(
+        addSpace(content, 18);
+
+        TextView title = makeText(
                 "નૈઋત",
-                38,
+                40,
                 TEXT,
                 Gravity.CENTER
         );
 
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTypeface(null, Typeface.BOLD);
 
-        LinearLayout.LayoutParams titleParams =
-                matchWrap();
+        content.addView(title, match());
 
-        titleParams.topMargin = dp(20);
+        addSpace(content, 8);
 
-        root.addView(title, titleParams);
-
-        TextView tagline = text(
+        TextView subtitle = makeText(
                 "તમારી આસપાસની સેવાઓ,\nહવે તમારી સાથે.",
                 19,
                 SECONDARY_TEXT,
                 Gravity.CENTER
         );
 
-        LinearLayout.LayoutParams tagParams =
-                matchWrap();
+        content.addView(subtitle, match());
 
-        tagParams.topMargin = dp(8);
+        addSpace(content, 8);
 
-        root.addView(tagline, tagParams);
-
-        TextView english = text(
+        TextView english = makeText(
                 "Services around you,\nnow connected with you.",
                 14,
                 SECONDARY_TEXT,
                 Gravity.CENTER
         );
 
-        LinearLayout.LayoutParams englishParams =
-                matchWrap();
+        content.addView(english, match());
 
-        englishParams.topMargin = dp(8);
+        Space flexible = new Space(this);
 
-        root.addView(english, englishParams);
-
-        Space middle = new Space(this);
-
-        LinearLayout.LayoutParams middleParams =
+        content.addView(
+                flexible,
                 new LinearLayout.LayoutParams(
-                        1, 0, 1
-                );
+                        1,
+                        0,
+                        1
+                )
+        );
 
-        root.addView(middle, middleParams);
-
-        TextView locationIcon = text(
+        TextView locationIcon = makeText(
                 "📍",
-                64,
+                65,
                 PRIMARY,
                 Gravity.CENTER
         );
 
-        root.addView(locationIcon, matchWrap());
+        content.addView(locationIcon, match());
 
-        Button start = primaryButton(
-                "શરૂ કરીએ  →"
-        );
+        addSpace(content, 20);
 
-        LinearLayout.LayoutParams startParams =
-                matchWrap();
+        Button start = primaryButton("શરૂ કરીએ  →");
 
+        LinearLayout.LayoutParams startParams = match();
         startParams.setMargins(
-                dp(25), dp(25), dp(25), dp(12)
+                dp(25),
+                0,
+                dp(25),
+                dp(12)
         );
 
-        root.addView(start, startParams);
+        content.addView(start, startParams);
 
         Button language = secondaryButton(
                 "ગુજરાતી  •  हिंदी  •  English"
         );
 
-        root.addView(
-                language,
-                matchWrap()
+        LinearLayout.LayoutParams languageParams = match();
+        languageParams.setMargins(
+                dp(25),
+                0,
+                dp(25),
+                dp(20)
         );
 
-        start.setOnClickListener(
-                v -> showRoleSelection()
-        );
+        content.addView(language, languageParams);
 
-        language.setOnClickListener(
-                v -> showRoleSelection()
-        );
+        start.setOnClickListener(v -> showRoleSelection());
 
-        setContentView(root);
+        language.setOnClickListener(v -> showRoleSelection());
+
+        setScreen(content);
     }
 
-    // ====================================================
+    // ============================================================
     // ROLE SELECTION
-    // ====================================================
+    // ============================================================
 
     private void showRoleSelection() {
 
-        LinearLayout root = baseLayout();
+        LinearLayout content = createContent();
 
         addHeader(
-                root,
+                content,
                 "નૈઋત",
                 "તમે નૈઋતનો ઉપયોગ કેવી રીતે કરશો?"
         );
 
-        LinearLayout homeCard =
-                roleCard(
-                        "🏠",
-                        "ઘર",
-                        "તમારી નજીક સેવા આવે ત્યારે જાણો"
-                );
+        addSpace(content, 20);
 
-        LinearLayout providerCard =
-                roleCard(
-                        "🥛",
-                        "સેવા આપનાર",
-                        "તમારી સેવા નજીકના ઘરો સુધી પહોંચાડો"
-                );
-
-        LinearLayout.LayoutParams p =
-                matchWrap();
-
-        p.setMargins(
-                dp(20), dp(25), dp(20), dp(10)
+        LinearLayout homeCard = roleCard(
+                "🏠",
+                "ઘર",
+                "તમારી નજીક સેવા આવે ત્યારે જાણો"
         );
 
-        root.addView(homeCard, p);
-
-        LinearLayout.LayoutParams p2 =
-                matchWrap();
-
-        p2.setMargins(
-                dp(20), dp(10), dp(20), dp(10)
+        LinearLayout.LayoutParams homeParams = match();
+        homeParams.setMargins(
+                dp(18),
+                0,
+                dp(18),
+                dp(12)
         );
 
-        root.addView(providerCard, p2);
+        content.addView(homeCard, homeParams);
 
-        TextView info = text(
+        LinearLayout providerCard = roleCard(
+                "🥛",
+                "સેવા આપનાર",
+                "તમારી સેવા નજીકના ઘરો સુધી પહોંચાડો"
+        );
+
+        LinearLayout.LayoutParams providerParams = match();
+        providerParams.setMargins(
+                dp(18),
+                0,
+                dp(18),
+                dp(12)
+        );
+
+        content.addView(providerCard, providerParams);
+
+        addSpace(content, 10);
+
+        TextView info = makeText(
                 "તમે પછીથી પણ તમારી ભૂમિકા બદલી શકો છો.",
                 14,
                 SECONDARY_TEXT,
                 Gravity.CENTER
         );
 
-        LinearLayout.LayoutParams infoParams =
-                matchWrap();
+        content.addView(info, match());
 
-        infoParams.topMargin = dp(20);
+        homeCard.setOnClickListener(v -> {
+            providerRole = false;
+            showHomeDashboard();
+        });
 
-        root.addView(info, infoParams);
+        providerCard.setOnClickListener(v -> {
+            providerRole = true;
+            showProviderDashboard();
+        });
 
-        homeCard.setOnClickListener(
-                v -> {
-                    providerRole = false;
-                    showHomeDashboard();
-                }
-        );
-
-        providerCard.setOnClickListener(
-                v -> {
-                    providerRole = true;
-                    showProviderDashboard();
-                }
-        );
-
-        setContentView(root);
+        setScreen(content);
     }
 
-    // ====================================================
+    // ============================================================
     // HOME DASHBOARD
-    // ====================================================
+    // ============================================================
 
     private void showHomeDashboard() {
 
         providerRole = false;
 
-        LinearLayout root = baseLayout();
+        LinearLayout content = createContent();
 
         addHeader(
-                root,
+                content,
                 "નમસ્તે 👋",
                 "તમારા આસપાસની સેવાઓ"
         );
 
-        // Location Card
-        LinearLayout locationCard =
-                card();
+        // --------------------------------------------------------
+        // LOCATION CARD
+        // --------------------------------------------------------
 
-        TextView locationTitle =
-                text(
-                        "📍  તમારું ઘર",
-                        18,
-                        TEXT,
-                        Gravity.LEFT
-                );
+        LinearLayout locationCard = card();
 
-        locationTitle.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        TextView locationTitle = makeText(
+                "📍  તમારું ઘર",
+                18,
+                TEXT,
+                Gravity.LEFT
         );
 
-        locationCard.addView(
-                locationTitle,
-                matchWrap()
+        bold(locationTitle);
+
+        locationCard.addView(locationTitle, match());
+
+        locationValue = makeText(
+                societySet
+                        ? "📍 Location set છે"
+                        : "Location હજુ set નથી",
+                15,
+                SECONDARY_TEXT,
+                Gravity.LEFT
         );
 
-        locationValue =
-                text(
-                        societySet
-                                ? "Location set છે"
-                                : "Location હજુ set નથી",
-                        15,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
+        addTopMargin(locationCard, locationValue, 8);
 
-        LinearLayout.LayoutParams lv =
-                matchWrap();
-
-        lv.topMargin = dp(8);
-
-        locationCard.addView(
-                locationValue,
-                lv
+        Button locationButton = secondaryButton(
+                "📍  Location Set કરો"
         );
 
-        Button locationButton =
-                secondaryButton(
-                        "📍  Location Set કરો"
-                );
+        addTopMargin(locationCard, locationButton, 12);
 
-        LinearLayout.LayoutParams lb =
-                matchWrap();
-
-        lb.topMargin = dp(12);
-
-        locationCard.addView(
-                locationButton,
-                lb
+        LinearLayout.LayoutParams locationParams = match();
+        locationParams.setMargins(
+                dp(18),
+                dp(15),
+                dp(18),
+                dp(8)
         );
 
-        LinearLayout.LayoutParams cp =
-                matchWrap();
+        content.addView(locationCard, locationParams);
 
-        cp.setMargins(
-                dp(20), dp(15), dp(20), dp(8)
+        locationButton.setOnClickListener(v -> setLocation());
+
+        // --------------------------------------------------------
+        // RADIUS CARD
+        // --------------------------------------------------------
+
+        LinearLayout radiusCard = card();
+
+        TextView radiusTitle = makeText(
+                "🎯  Notification Radius",
+                18,
+                TEXT,
+                Gravity.LEFT
         );
 
-        root.addView(locationCard, cp);
+        bold(radiusTitle);
 
-        locationButton.setOnClickListener(
-                v -> setLocation()
+        radiusCard.addView(radiusTitle, match());
+
+        TextView radiusValue = makeText(
+                "500 meter",
+                16,
+                SECONDARY_TEXT,
+                Gravity.LEFT
         );
 
-        // Radius
-        LinearLayout radiusCard =
-                card();
+        addTopMargin(radiusCard, radiusValue, 8);
 
-        TextView radiusTitle =
-                text(
-                        "🎯  Notification Radius",
-                        18,
-                        TEXT,
-                        Gravity.LEFT
-                );
-
-        radiusTitle.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        TextView radiusHint = makeText(
+                "Provider આ વિસ્તારમાં આવે ત્યારે તમને alert મળશે.",
+                13,
+                SECONDARY_TEXT,
+                Gravity.LEFT
         );
 
-        radiusCard.addView(
-                radiusTitle,
-                matchWrap()
+        addTopMargin(radiusCard, radiusHint, 4);
+
+        LinearLayout.LayoutParams radiusParams = match();
+        radiusParams.setMargins(
+                dp(18),
+                dp(8),
+                dp(18),
+                dp(8)
         );
 
-        radiusValue =
-                text(
-                        "500 meter",
-                        16,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
+        content.addView(radiusCard, radiusParams);
 
-        LinearLayout.LayoutParams rv =
-                matchWrap();
+        // --------------------------------------------------------
+        // SERVICES CARD
+        // --------------------------------------------------------
 
-        rv.topMargin = dp(8);
+        LinearLayout servicesCard = card();
 
-        radiusCard.addView(
-                radiusValue,
-                rv
+        TextView servicesTitle = makeText(
+                "🔔  મારી સેવાઓ",
+                18,
+                TEXT,
+                Gravity.LEFT
         );
 
-        TextView radiusHint =
-                text(
-                        "Provider આ વિસ્તારમાં આવે ત્યારે તમને alert મળશે.",
-                        13,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
+        bold(servicesTitle);
 
-        LinearLayout.LayoutParams rh =
-                matchWrap();
+        servicesCard.addView(servicesTitle, match());
 
-        rh.topMargin = dp(4);
-
-        radiusCard.addView(
-                radiusHint,
-                rh
+        TextView services = makeText(
+                "🥛  દૂધ",
+                16,
+                SECONDARY_TEXT,
+                Gravity.LEFT
         );
 
-        LinearLayout.LayoutParams rp =
-                matchWrap();
+        addTopMargin(servicesCard, services, 8);
 
-        rp.setMargins(
-                dp(20), dp(8), dp(20), dp(8)
+        LinearLayout.LayoutParams servicesParams = match();
+        servicesParams.setMargins(
+                dp(18),
+                dp(8),
+                dp(18),
+                dp(8)
         );
 
-        root.addView(radiusCard, rp);
+        content.addView(servicesCard, servicesParams);
 
-        // Services
-        LinearLayout serviceCard =
-                card();
+        // --------------------------------------------------------
+        // MONITORING CARD
+        // --------------------------------------------------------
 
-        TextView serviceTitle =
-                text(
-                        "🔔  મારી સેવાઓ",
-                        18,
-                        TEXT,
-                        Gravity.LEFT
-                );
+        LinearLayout monitoringCard = card();
 
-        serviceTitle.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        TextView monitoringTitle = makeText(
+                "📡  Monitoring",
+                18,
+                TEXT,
+                Gravity.LEFT
         );
 
-        serviceCard.addView(
-                serviceTitle,
-                matchWrap()
-        );
-
-        serviceValue =
-                text(
-                        "🥛 દૂધ",
-                        16,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
-
-        LinearLayout.LayoutParams sv =
-                matchWrap();
-
-        sv.topMargin = dp(8);
-
-        serviceCard.addView(
-                serviceValue,
-                sv
-        );
-
-        LinearLayout.LayoutParams sp =
-                matchWrap();
-
-        sp.setMargins(
-                dp(20), dp(8), dp(20), dp(8)
-        );
-
-        root.addView(serviceCard, sp);
-
-        // Status
-        LinearLayout monitoringCard =
-                card();
-
-        TextView monitoringTitle =
-                text(
-                        "📡  Monitoring",
-                        18,
-                        TEXT,
-                        Gravity.LEFT
-                );
-
-        monitoringTitle.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
-        );
+        bold(monitoringTitle);
 
         monitoringCard.addView(
                 monitoringTitle,
-                matchWrap()
+                match()
         );
 
-        serviceStatus =
-                text(
-                        "⚪ તૈયાર",
-                        16,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
+        serviceStatus = makeText(
+                "⚪ તૈયાર",
+                16,
+                SECONDARY_TEXT,
+                Gravity.LEFT
+        );
 
-        LinearLayout.LayoutParams ss =
-                matchWrap();
-
-        ss.topMargin = dp(8);
-
-        monitoringCard.addView(
+        addTopMargin(
+                monitoringCard,
                 serviceStatus,
-                ss
+                8
         );
 
-        startButton =
-                primaryButton(
-                        "▶  Monitoring શરૂ કરો"
-                );
-
-        LinearLayout.LayoutParams stb =
-                matchWrap();
-
-        stb.topMargin = dp(15);
-
-        monitoringCard.addView(
-                startButton,
-                stb
+        Button start = primaryButton(
+                "▶  Monitoring શરૂ કરો"
         );
 
-        stopButton =
-                dangerButton(
-                        "■  Monitoring બંધ કરો"
-                );
-
-        LinearLayout.LayoutParams spb =
-                matchWrap();
-
-        spb.topMargin = dp(8);
-
-        monitoringCard.addView(
-                stopButton,
-                spb
+        addTopMargin(
+                monitoringCard,
+                start,
+                15
         );
 
-        LinearLayout.LayoutParams mp =
-                matchWrap();
-
-        mp.setMargins(
-                dp(20), dp(8), dp(20), dp(20)
+        Button stop = dangerButton(
+                "■  Monitoring બંધ કરો"
         );
 
-        root.addView(monitoringCard, mp);
-
-        startButton.setOnClickListener(
-                v -> startApp()
+        addTopMargin(
+                monitoringCard,
+                stop,
+                8
         );
 
-        stopButton.setOnClickListener(
-                v -> stopApp()
+        LinearLayout.LayoutParams monitoringParams = match();
+
+        monitoringParams.setMargins(
+                dp(18),
+                dp(8),
+                dp(18),
+                dp(20)
         );
 
-        // Bottom navigation
+        content.addView(
+                monitoringCard,
+                monitoringParams
+        );
+
+        start.setOnClickListener(v -> startApp());
+
+        stop.setOnClickListener(v -> stopApp());
+
+        // --------------------------------------------------------
+        // STATUS
+        // --------------------------------------------------------
+
+        globalStatus = makeText(
+                "",
+                13,
+                SECONDARY_TEXT,
+                Gravity.CENTER
+        );
+
+        content.addView(globalStatus, match());
+
         addBottomNavigation(
-                root,
+                content,
                 false
         );
 
-        setContentView(root);
+        setScreen(content);
     }
 
-    // ====================================================
+    // ============================================================
     // PROVIDER DASHBOARD
-    // ====================================================
+    // ============================================================
 
     private void showProviderDashboard() {
 
         providerRole = true;
 
-        LinearLayout root = baseLayout();
+        LinearLayout content = createContent();
 
         addHeader(
-                root,
+                content,
                 "સેવા આપનાર 👋",
                 "તમારી સેવા નજીકના ઘરો સુધી પહોંચાડો"
         );
 
-        // Service card
-        LinearLayout serviceCard =
-                card();
+        // --------------------------------------------------------
+        // SERVICE CARD
+        // --------------------------------------------------------
 
-        TextView serviceTitle =
-                text(
-                        "🥛  મારી સેવા",
-                        18,
-                        TEXT,
-                        Gravity.LEFT
-                );
+        LinearLayout serviceCard = card();
 
-        serviceTitle.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        TextView serviceTitle = makeText(
+                "🥛  મારી સેવા",
+                18,
+                TEXT,
+                Gravity.LEFT
         );
+
+        bold(serviceTitle);
 
         serviceCard.addView(
                 serviceTitle,
-                matchWrap()
+                match()
         );
 
-        TextView serviceName =
-                text(
-                        "દૂધ સેવા",
-                        16,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
-
-        LinearLayout.LayoutParams sn =
-                matchWrap();
-
-        sn.topMargin = dp(8);
-
-        serviceCard.addView(
-                serviceName,
-                sn
+        TextView serviceName = makeText(
+                "દૂધ સેવા",
+                16,
+                SECONDARY_TEXT,
+                Gravity.LEFT
         );
 
-        LinearLayout.LayoutParams scp =
-                matchWrap();
-
-        scp.setMargins(
-                dp(20), dp(20), dp(20), dp(8)
-        );
-
-        root.addView(
+        addTopMargin(
                 serviceCard,
-                scp
+                serviceName,
+                8
         );
 
-        // Location
-        LinearLayout locationCard =
-                card();
+        LinearLayout.LayoutParams serviceParams = match();
 
-        TextView locationTitle =
-                text(
-                        "📍  Location Sharing",
-                        18,
-                        TEXT,
-                        Gravity.LEFT
-                );
-
-        locationTitle.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        serviceParams.setMargins(
+                dp(18),
+                dp(20),
+                dp(18),
+                dp(8)
         );
+
+        content.addView(
+                serviceCard,
+                serviceParams
+        );
+
+        // --------------------------------------------------------
+        // LOCATION SHARING CARD
+        // --------------------------------------------------------
+
+        LinearLayout locationCard = card();
+
+        TextView locationTitle = makeText(
+                "📍  Location Sharing",
+                18,
+                TEXT,
+                Gravity.LEFT
+        );
+
+        bold(locationTitle);
 
         locationCard.addView(
                 locationTitle,
-                matchWrap()
+                match()
         );
 
-        locationValue =
-                text(
-                        societySet
-                                ? "Current location ready"
-                                : "Location set કરો",
-                        15,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
-
-        LinearLayout.LayoutParams lvp =
-                matchWrap();
-
-        lvp.topMargin = dp(8);
-
-        locationCard.addView(
-                locationValue,
-                lvp
+        locationValue = makeText(
+                societySet
+                        ? "📍 Current location ready"
+                        : "Location set કરો",
+                15,
+                SECONDARY_TEXT,
+                Gravity.LEFT
         );
 
-        Button locButton =
-                secondaryButton(
-                        "📍  Current Location"
-                );
-
-        LinearLayout.LayoutParams locp =
-                matchWrap();
-
-        locp.topMargin = dp(12);
-
-        locationCard.addView(
-                locButton,
-                locp
-        );
-
-        LinearLayout.LayoutParams lcp =
-                matchWrap();
-
-        lcp.setMargins(
-                dp(20), dp(8), dp(20), dp(8)
-        );
-
-        root.addView(
+        addTopMargin(
                 locationCard,
-                lcp
+                locationValue,
+                8
         );
 
-        locButton.setOnClickListener(
+        Button currentLocation = secondaryButton(
+                "📍  Current Location"
+        );
+
+        addTopMargin(
+                locationCard,
+                currentLocation,
+                12
+        );
+
+        LinearLayout.LayoutParams locationParams = match();
+
+        locationParams.setMargins(
+                dp(18),
+                dp(8),
+                dp(18),
+                dp(8)
+        );
+
+        content.addView(
+                locationCard,
+                locationParams
+        );
+
+        currentLocation.setOnClickListener(
                 v -> setLocation()
         );
 
-        // Active service
-        LinearLayout activeCard =
-                card();
+        // --------------------------------------------------------
+        // ACTIVE SERVICE CARD
+        // --------------------------------------------------------
 
-        TextView activeTitle =
-                text(
-                        "📡  સેવા સ્થિતિ",
-                        18,
-                        TEXT,
-                        Gravity.LEFT
-                );
+        LinearLayout activeCard = card();
 
-        activeTitle.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        TextView activeTitle = makeText(
+                "📡  સેવા સ્થિતિ",
+                18,
+                TEXT,
+                Gravity.LEFT
         );
+
+        bold(activeTitle);
 
         activeCard.addView(
                 activeTitle,
-                matchWrap()
+                match()
         );
 
-        serviceStatus =
-                text(
-                        "⚪ OFFLINE",
-                        20,
-                        SECONDARY_TEXT,
-                        Gravity.LEFT
-                );
-
-        LinearLayout.LayoutParams statusParams =
-                matchWrap();
-
-        statusParams.topMargin = dp(10);
-
-        activeCard.addView(
-                serviceStatus,
-                statusParams
+        serviceStatus = makeText(
+                "⚪ OFFLINE",
+                20,
+                SECONDARY_TEXT,
+                Gravity.LEFT
         );
 
-        startButton =
-                primaryButton(
-                        "▶  સેવા શરૂ કરો"
-                );
-
-        LinearLayout.LayoutParams sbp =
-                matchWrap();
-
-        sbp.topMargin = dp(18);
-
-        activeCard.addView(
-                startButton,
-                sbp
-        );
-
-        stopButton =
-                dangerButton(
-                        "■  સેવા બંધ કરો"
-                );
-
-        LinearLayout.LayoutParams stp =
-                matchWrap();
-
-        stp.topMargin = dp(8);
-
-        activeCard.addView(
-                stopButton,
-                stp
-        );
-
-        LinearLayout.LayoutParams acp =
-                matchWrap();
-
-        acp.setMargins(
-                dp(20), dp(8), dp(20), dp(20)
-        );
-
-        root.addView(
+        addTopMargin(
                 activeCard,
-                acp
+                serviceStatus,
+                10
         );
 
-        startButton.setOnClickListener(
+        Button start = primaryButton(
+                "▶  સેવા શરૂ કરો"
+        );
+
+        addTopMargin(
+                activeCard,
+                start,
+                18
+        );
+
+        Button stop = dangerButton(
+                "■  સેવા બંધ કરો"
+        );
+
+        addTopMargin(
+                activeCard,
+                stop,
+                8
+        );
+
+        LinearLayout.LayoutParams activeParams = match();
+
+        activeParams.setMargins(
+                dp(18),
+                dp(8),
+                dp(18),
+                dp(20)
+        );
+
+        content.addView(
+                activeCard,
+                activeParams
+        );
+
+        start.setOnClickListener(
                 v -> startApp()
         );
 
-        stopButton.setOnClickListener(
+        stop.setOnClickListener(
                 v -> stopApp()
         );
 
+        // --------------------------------------------------------
+        // STATUS
+        // --------------------------------------------------------
+
+        globalStatus = makeText(
+                "",
+                13,
+                SECONDARY_TEXT,
+                Gravity.CENTER
+        );
+
+        content.addView(
+                globalStatus,
+                match()
+        );
+
         addBottomNavigation(
-                root,
+                content,
                 true
         );
 
-        setContentView(root);
+        setScreen(content);
     }
 
-    // ====================================================
+    // ============================================================
     // EXISTING LOCATION FUNCTIONALITY
-    // ====================================================
+    // ============================================================
 
     private void setLocation() {
 
-        if (checkSelfPermission(
-                Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission(
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED) {
 
             requestPermissionsIfNeeded();
 
@@ -827,46 +739,45 @@ public class MainActivity extends Activity {
             return;
         }
 
-        LocationManager lm =
+        LocationManager locationManager =
                 (LocationManager)
-                        getSystemService(
-                                LOCATION_SERVICE
-                        );
+                        getSystemService(LOCATION_SERVICE);
 
         try {
 
-            Location l =
-                    lm.getLastKnownLocation(
+            Location location =
+                    locationManager.getLastKnownLocation(
                             LocationManager.GPS_PROVIDER
                     );
 
-            if (l == null) {
+            if (location == null) {
 
-                l = lm.getLastKnownLocation(
-                        LocationManager.NETWORK_PROVIDER
-                );
+                location =
+                        locationManager.getLastKnownLocation(
+                                LocationManager.NETWORK_PROVIDER
+                        );
             }
 
-            if (l == null) {
+            if (location == null) {
 
                 updateStatus(
-                        "⚠️ Location મળી નથી.\nGPS ચાલુ કરો અને ફરી try કરો."
+                        "⚠️ Location મળી નથી.\n" +
+                        "GPS ચાલુ કરો અને ફરી try કરો."
                 );
 
                 return;
             }
 
-            societyLat =
-                    l.getLatitude();
-
-            societyLon =
-                    l.getLongitude();
+            societyLat = location.getLatitude();
+            societyLon = location.getLongitude();
 
             societySet = true;
 
             getSharedPreferences(
-                    "app", 0
-            ).edit()
+                    "app",
+                    MODE_PRIVATE
+            )
+                    .edit()
                     .putBoolean(
                             "set",
                             true
@@ -886,6 +797,7 @@ public class MainActivity extends Activity {
                     .apply();
 
             if (locationValue != null) {
+
                 locationValue.setText(
                         "📍 Location set successfully"
                 );
@@ -910,9 +822,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ====================================================
+    // ============================================================
     // EXISTING START FUNCTIONALITY
-    // ====================================================
+    // ============================================================
 
     private void startApp() {
 
@@ -925,54 +837,61 @@ public class MainActivity extends Activity {
             return;
         }
 
-        Intent i =
+        Intent intent =
                 new Intent(
                         this,
                         LocationService.class
                 );
 
-        i.putExtra(
+        intent.putExtra(
                 "role",
                 providerRole
                         ? "MILKMAN"
                         : "HOME"
         );
 
-        if (Build.VERSION.SDK_INT >= 26) {
+        try {
 
-            startForegroundService(i);
+            if (Build.VERSION.SDK_INT >= 26) {
 
-        } else {
+                startForegroundService(intent);
 
-            startService(i);
-        }
+            } else {
 
-        if (serviceStatus != null) {
+                startService(intent);
+            }
 
-            serviceStatus.setText(
-                    providerRole
-                            ? "🟢 ONLINE\nGPS Location Sharing ચાલુ છે"
-                            : "🟢 MONITORING\nદૂધવાળાની રાહ જોઈ રહ્યા છીએ..."
-            );
+            if (serviceStatus != null) {
 
-            serviceStatus.setTextColor(
-                    SUCCESS
-            );
-        }
+                serviceStatus.setText(
+                        providerRole
+                                ? "🟢 ONLINE\nGPS Location Sharing ચાલુ છે"
+                                : "🟢 MONITORING\nદૂધવાળાની રાહ જોઈ રહ્યા છીએ..."
+                );
 
-        if (status != null) {
+                serviceStatus.setTextColor(
+                        SUCCESS
+                );
+            }
 
-            status.setText(
+            updateGlobalStatus(
                     providerRole
                             ? "🥛 GPS Monitoring ચાલુ..."
                             : "🏠 Monitoring ચાલુ..."
             );
+
+        } catch (Exception e) {
+
+            updateStatus(
+                    "⚠️ Service start થઈ શક્યું નથી.\n" +
+                    e.getClass().getSimpleName()
+            );
         }
     }
 
-    // ====================================================
+    // ============================================================
     // EXISTING STOP FUNCTIONALITY
-    // ====================================================
+    // ============================================================
 
     private void stopApp() {
 
@@ -996,39 +915,36 @@ public class MainActivity extends Activity {
             );
         }
 
-        if (status != null) {
-
-            status.setText(
-                    "⚪ STOPPED"
-            );
-        }
+        updateGlobalStatus(
+                "⚪ STOPPED"
+        );
     }
 
-    // ====================================================
+    // ============================================================
     // EXISTING PERMISSIONS
-    // ====================================================
+    // ============================================================
 
     private void requestPermissionsIfNeeded() {
 
-        ArrayList<String> p =
+        ArrayList<String> permissions =
                 new ArrayList<>();
 
         if (Build.VERSION.SDK_INT >= 23) {
 
             if (checkSelfPermission(
-                    Manifest.permission.ACCESS_FINE_LOCATION)
-                    != PackageManager.PERMISSION_GRANTED) {
+                    Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED) {
 
-                p.add(
+                permissions.add(
                         Manifest.permission.ACCESS_FINE_LOCATION
                 );
             }
 
             if (checkSelfPermission(
-                    Manifest.permission.ACCESS_COARSE_LOCATION)
-                    != PackageManager.PERMISSION_GRANTED) {
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED) {
 
-                p.add(
+                permissions.add(
                         Manifest.permission.ACCESS_COARSE_LOCATION
                 );
             }
@@ -1037,19 +953,19 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33) {
 
             if (checkSelfPermission(
-                    Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
+                    Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED) {
 
-                p.add(
+                permissions.add(
                         Manifest.permission.POST_NOTIFICATIONS
                 );
             }
         }
 
-        if (!p.isEmpty()) {
+        if (!permissions.isEmpty()) {
 
             requestPermissions(
-                    p.toArray(
+                    permissions.toArray(
                             new String[0]
                     ),
                     REQ
@@ -1057,26 +973,27 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ====================================================
-    // EXISTING LOAD
-    // ====================================================
+    // ============================================================
+    // LOAD SAVED LOCATION
+    // ============================================================
 
     private void load() {
 
-        SharedPreferences p =
+        SharedPreferences preferences =
                 getSharedPreferences(
-                        "app", 0
+                        "app",
+                        MODE_PRIVATE
                 );
 
         societySet =
-                p.getBoolean(
+                preferences.getBoolean(
                         "set",
                         false
                 );
 
         societyLat =
                 Double.longBitsToDouble(
-                        p.getLong(
+                        preferences.getLong(
                                 "lat",
                                 0
                         )
@@ -1084,127 +1001,107 @@ public class MainActivity extends Activity {
 
         societyLon =
                 Double.longBitsToDouble(
-                        p.getLong(
+                        preferences.getLong(
                                 "lon",
                                 0
                         )
                 );
     }
 
-    // ====================================================
-    // UI HELPERS
-    // ====================================================
+    // ============================================================
+    // SCREEN CONTAINER
+    // ============================================================
 
-    private LinearLayout baseLayout() {
+    private LinearLayout createContent() {
 
-        LinearLayout root =
+        LinearLayout content =
                 new LinearLayout(this);
 
-        root.setOrientation(
+        content.setOrientation(
                 LinearLayout.VERTICAL
         );
 
-        root.setPadding(
+        content.setPadding(
                 dp(18),
+                dp(20),
                 dp(18),
-                dp(18),
-                dp(10)
+                dp(20)
         );
 
-        root.setBackgroundColor(
+        content.setBackgroundColor(
                 BACKGROUND
         );
 
-        ScrollView scroll =
-                new ScrollView(this);
-
-        scroll.setFillViewport(true);
-
-        scroll.addView(root);
-
-        // Return root itself.
-        // Main content remains scrollable through
-        // the outer wrapper created below.
-
-        return createScrollableRoot(root);
+        return content;
     }
 
-    private LinearLayout createScrollableRoot(
+    private void setScreen(
             LinearLayout content
     ) {
 
-        LinearLayout wrapper =
-                new LinearLayout(this);
-
-        wrapper.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        wrapper.setBackgroundColor(
-                BACKGROUND
-        );
-
         ScrollView scroll =
                 new ScrollView(this);
 
         scroll.setFillViewport(true);
 
-        scroll.addView(content);
+        scroll.setBackgroundColor(
+                BACKGROUND
+        );
 
-        wrapper.addView(
-                scroll,
-                new LinearLayout.LayoutParams(
+        scroll.addView(
+                content,
+                new ScrollView.LayoutParams(
                         -1,
-                        0,
-                        1
+                        -2
                 )
         );
 
-        return wrapper;
+        setContentView(scroll);
     }
 
+    // ============================================================
+    // HEADER
+    // ============================================================
+
     private void addHeader(
-            LinearLayout root,
+            LinearLayout parent,
             String title,
             String subtitle
     ) {
 
-        TextView t =
-                text(
+        TextView titleView =
+                makeText(
                         title,
                         30,
                         TEXT,
                         Gravity.LEFT
                 );
 
-        t.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        bold(titleView);
+
+        parent.addView(
+                titleView,
+                match()
         );
 
-        root.addView(
-                t,
-                matchWrap()
-        );
-
-        TextView s =
-                text(
+        TextView subtitleView =
+                makeText(
                         subtitle,
                         15,
                         SECONDARY_TEXT,
                         Gravity.LEFT
                 );
 
-        LinearLayout.LayoutParams sp =
-                matchWrap();
-
-        sp.topMargin = dp(4);
-
-        root.addView(
-                s,
-                sp
+        addTopMargin(
+                parent,
+                subtitleView,
+                5
         );
     }
+
+    // ============================================================
+    // ROLE CARD
+    // ============================================================
 
     private LinearLayout roleCard(
             String icon,
@@ -1216,198 +1113,206 @@ public class MainActivity extends Activity {
                 card();
 
         TextView iconView =
-                text(
+                makeText(
                         icon,
-                        40,
+                        42,
                         TEXT,
                         Gravity.CENTER
                 );
 
-        LinearLayout.LayoutParams ip =
-                matchWrap();
-
         card.addView(
                 iconView,
-                ip
+                match()
         );
 
-        TextView t =
-                text(
+        TextView titleView =
+                makeText(
                         title,
                         22,
                         TEXT,
                         Gravity.CENTER
                 );
 
-        t.setTypeface(
-                null,
-                android.graphics.Typeface.BOLD
+        bold(titleView);
+
+        addTopMargin(
+                card,
+                titleView,
+                8
         );
 
-        LinearLayout.LayoutParams tp =
-                matchWrap();
-
-        tp.topMargin = dp(8);
-
-        card.addView(
-                t,
-                tp
-        );
-
-        TextView d =
-                text(
+        TextView descriptionView =
+                makeText(
                         description,
                         14,
                         SECONDARY_TEXT,
                         Gravity.CENTER
                 );
 
-        LinearLayout.LayoutParams dp =
-                matchWrap();
-
-        dp.topMargin = dp(5);
-
-        card.addView(
-                d,
-                dp
+        addTopMargin(
+                card,
+                descriptionView,
+                5
         );
 
         return card;
     }
 
+    // ============================================================
+    // CARD
+    // ============================================================
+
     private LinearLayout card() {
 
-        LinearLayout c =
+        LinearLayout layout =
                 new LinearLayout(this);
 
-        c.setOrientation(
+        layout.setOrientation(
                 LinearLayout.VERTICAL
         );
 
-        c.setPadding(
+        layout.setPadding(
                 dp(18),
                 dp(18),
                 dp(18),
                 dp(18)
         );
 
-        GradientDrawable bg =
+        GradientDrawable background =
                 new GradientDrawable();
 
-        bg.setColor(CARD);
+        background.setColor(CARD);
 
-        bg.setCornerRadius(
+        background.setCornerRadius(
                 dp(20)
         );
 
-        c.setBackground(bg);
+        layout.setBackground(
+                background
+        );
 
-        c.setElevation(
+        layout.setElevation(
                 dp(2)
         );
 
-        return c;
+        return layout;
     }
+
+    // ============================================================
+    // PRIMARY BUTTON
+    // ============================================================
 
     private Button primaryButton(
             String title
     ) {
 
-        Button b =
+        Button button =
                 new Button(this);
 
-        b.setText(title);
+        button.setText(title);
 
-        b.setTextSize(16);
+        button.setTextSize(16);
 
-        b.setTextColor(
+        button.setTextColor(
                 Color.WHITE
         );
 
-        b.setAllCaps(false);
+        button.setAllCaps(false);
 
-        b.setMinHeight(
+        button.setMinHeight(
                 dp(52)
         );
 
-        GradientDrawable bg =
+        GradientDrawable background =
                 new GradientDrawable();
 
-        bg.setColor(
+        background.setColor(
                 PRIMARY
         );
 
-        bg.setCornerRadius(
+        background.setCornerRadius(
                 dp(16)
         );
 
-        b.setBackground(bg);
+        button.setBackground(
+                background
+        );
 
-        return b;
+        return button;
     }
+
+    // ============================================================
+    // SECONDARY BUTTON
+    // ============================================================
 
     private Button secondaryButton(
             String title
     ) {
 
-        Button b =
+        Button button =
                 new Button(this);
 
-        b.setText(title);
+        button.setText(title);
 
-        b.setTextSize(15);
+        button.setTextSize(15);
 
-        b.setTextColor(
+        button.setTextColor(
                 TEXT
         );
 
-        b.setAllCaps(false);
+        button.setAllCaps(false);
 
-        b.setMinHeight(
+        button.setMinHeight(
                 dp(50)
         );
 
-        GradientDrawable bg =
+        GradientDrawable background =
                 new GradientDrawable();
 
-        bg.setColor(
+        background.setColor(
                 SECONDARY
         );
 
-        bg.setCornerRadius(
+        background.setCornerRadius(
                 dp(15)
         );
 
-        b.setBackground(bg);
+        button.setBackground(
+                background
+        );
 
-        return b;
+        return button;
     }
+
+    // ============================================================
+    // DANGER / STOP BUTTON
+    // ============================================================
 
     private Button dangerButton(
             String title
     ) {
 
-        Button b =
+        Button button =
                 new Button(this);
 
-        b.setText(title);
+        button.setText(title);
 
-        b.setTextSize(15);
+        button.setTextSize(15);
 
-        b.setTextColor(
+        button.setTextColor(
                 TEXT
         );
 
-        b.setAllCaps(false);
+        button.setAllCaps(false);
 
-        b.setMinHeight(
+        button.setMinHeight(
                 dp(50)
         );
 
-        GradientDrawable bg =
+        GradientDrawable background =
                 new GradientDrawable();
 
-        bg.setColor(
+        background.setColor(
                 Color.rgb(
                         235,
                         242,
@@ -1415,82 +1320,62 @@ public class MainActivity extends Activity {
                 )
         );
 
-        bg.setCornerRadius(
+        background.setCornerRadius(
                 dp(15)
         );
 
-        b.setBackground(bg);
+        button.setBackground(
+                background
+        );
 
-        return b;
+        return button;
     }
 
-    private TextView text(
+    // ============================================================
+    // TEXT
+    // ============================================================
+
+    private TextView makeText(
             String value,
             float size,
             int color,
             int gravity
     ) {
 
-        TextView t =
+        TextView text =
                 new TextView(this);
 
-        t.setText(value);
+        text.setText(value);
 
-        t.setTextSize(size);
+        text.setTextSize(size);
 
-        t.setTextColor(color);
+        text.setTextColor(color);
 
-        t.setGravity(gravity);
+        text.setGravity(gravity);
 
-        t.setPadding(
+        text.setPadding(
                 dp(2),
                 dp(2),
                 dp(2),
                 dp(2)
         );
 
-        return t;
+        return text;
     }
 
-    private LinearLayout.LayoutParams matchWrap() {
-
-        return new LinearLayout.LayoutParams(
-                -1,
-                -2
-        );
-    }
-
-    private int dp(int value) {
-
-        return (int) (
-                value *
-                        getResources()
-                                .getDisplayMetrics()
-                                .density
-        );
-    }
-
-    private void updateStatus(
-            String message
-    ) {
-
-        if (status != null) {
-            status.setText(message);
-        }
-
-        if (serviceStatus != null) {
-            serviceStatus.setText(message);
-        }
-    }
-
-    // ====================================================
+    // ============================================================
     // BOTTOM NAVIGATION
-    // ====================================================
+    // ============================================================
 
     private void addBottomNavigation(
-            LinearLayout root,
+            LinearLayout parent,
             boolean provider
     ) {
+
+        addSpace(
+                parent,
+                12
+        );
 
         LinearLayout nav =
                 new LinearLayout(this);
@@ -1504,51 +1389,59 @@ public class MainActivity extends Activity {
         );
 
         nav.setPadding(
-                0,
-                dp(8),
-                0,
-                dp(8)
+                dp(5),
+                dp(6),
+                dp(5),
+                dp(6)
         );
 
-        GradientDrawable bg =
+        GradientDrawable background =
                 new GradientDrawable();
 
-        bg.setColor(
+        background.setColor(
                 Color.WHITE
         );
 
-        bg.setCornerRadius(
+        background.setCornerRadius(
                 dp(18)
         );
 
-        nav.setBackground(bg);
+        nav.setBackground(
+                background
+        );
 
-        String[] items =
-                provider
-                        ? new String[]{
-                        "⌂\nHome",
-                        "◉\nActivity",
-                        "🔔\nAlerts",
-                        "●\nProfile"
-                }
-                        : new String[]{
-                        "⌂\nHome",
-                        "📍\nNearby",
-                        "🔔\nAlerts",
-                        "●\nProfile"
-                };
+        String[] items;
+
+        if (provider) {
+
+            items = new String[]{
+                    "⌂\nHome",
+                    "◉\nActivity",
+                    "🔔\nAlerts",
+                    "●\nProfile"
+            };
+
+        } else {
+
+            items = new String[]{
+                    "⌂\nHome",
+                    "📍\nNearby",
+                    "🔔\nAlerts",
+                    "●\nProfile"
+            };
+        }
 
         for (String item : items) {
 
-            TextView v =
-                    text(
+            TextView itemView =
+                    makeText(
                             item,
                             12,
                             TEXT,
                             Gravity.CENTER
                     );
 
-            LinearLayout.LayoutParams np =
+            LinearLayout.LayoutParams params =
                     new LinearLayout.LayoutParams(
                             0,
                             dp(58),
@@ -1556,24 +1449,128 @@ public class MainActivity extends Activity {
                     );
 
             nav.addView(
-                    v,
-                    np
+                    itemView,
+                    params
             );
         }
 
         LinearLayout.LayoutParams navParams =
-                matchWrap();
+                match();
 
         navParams.setMargins(
-                dp(5),
-                dp(5),
-                dp(5),
-                dp(5)
+                dp(2),
+                dp(4),
+                dp(2),
+                dp(4)
         );
 
-        root.addView(
+        parent.addView(
                 nav,
                 navParams
         );
+    }
+
+    // ============================================================
+    // UI HELPERS
+    // ============================================================
+
+    private LinearLayout.LayoutParams match() {
+
+        return new LinearLayout.LayoutParams(
+                -1,
+                -2
+        );
+    }
+
+    private void addTopMargin(
+            LinearLayout parent,
+            View view,
+            int margin
+    ) {
+
+        LinearLayout.LayoutParams params =
+                match();
+
+        params.topMargin =
+                dp(margin);
+
+        parent.addView(
+                view,
+                params
+        );
+    }
+
+    private void addSpace(
+            LinearLayout parent,
+            int height
+    ) {
+
+        Space space =
+                new Space(this);
+
+        parent.addView(
+                space,
+                new LinearLayout.LayoutParams(
+                        1,
+                        dp(height)
+                )
+        );
+    }
+
+    private void bold(
+            TextView view
+    ) {
+
+        view.setTypeface(
+                null,
+                Typeface.BOLD
+        );
+    }
+
+    private int dp(
+            int value
+    ) {
+
+        return (int) (
+                value *
+                        getResources()
+                                .getDisplayMetrics()
+                                .density
+        );
+    }
+
+    // ============================================================
+    // STATUS HELPERS
+    // ============================================================
+
+    private void updateStatus(
+            String message
+    ) {
+
+        if (serviceStatus != null) {
+
+            serviceStatus.setText(
+                    message
+            );
+        }
+
+        if (globalStatus != null) {
+
+            globalStatus.setText(
+                    message
+            );
+        }
+    }
+
+    private void updateGlobalStatus(
+            String message
+    ) {
+
+        if (globalStatus != null) {
+
+            globalStatus.setText(
+                    message
+            );
+        }
     }
 }
